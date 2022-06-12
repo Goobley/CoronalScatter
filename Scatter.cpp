@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 #include <cstdio>
 #include <cstring>
 #include "JasPP.hpp"
@@ -5,6 +6,7 @@
 
 typedef double fp_t;
 // typedef float fp_t;
+#define WRITE_OUT 0
 
 namespace ConstantsF64
 {
@@ -15,6 +17,16 @@ namespace ConstantsF64
     constexpr f64 au = 215.0;
     constexpr f64 Pi = M_PI;
     constexpr f64 TwoPi = 2.0 * M_PI;
+}
+namespace ConstantsF32
+{
+    constexpr float Rs = 6.96e10f;
+    constexpr float c = 2.998e10f;
+    constexpr float c_r = c / Rs;
+    constexpr float c_s = 2e7f / Rs;
+    constexpr float au = 215.0f;
+    constexpr float Pi = M_PI;
+    constexpr float TwoPi = 2.0f * M_PI;
 }
 
 template <typename T>
@@ -42,6 +54,7 @@ constexpr T max(T a, T b)
 }
 
 namespace Constants = ConstantsF64;
+// namespace Constants = ConstantsF32;
 
 template <typename RandState>
 struct BaseSimState
@@ -120,6 +133,7 @@ SimParams default_params()
     return result;
 }
 
+#if 0
 fp_t density_r(fp_t r)
 {
     namespace C = Constants;
@@ -152,6 +166,17 @@ fp_t domega_dr(fp_t r)
     fp_t rOut = (1.0 + StepSize) * r;
 
     return (omega_pe(rOut) - omega_pe(rIn)) / (rOut - rIn);
+}
+#else
+extern "C"
+{
+#include "density_model.c"
+}
+#endif
+inline void omega_pe_dr(fp_t r, fp_t* result)
+{
+    result[0] = omega_pe(r);
+    result[1] = domega_dr(r);
 }
 
 fp_t nu_scat_krupar(fp_t r, fp_t omega, fp_t eps)
@@ -389,7 +414,10 @@ void advance_dtsave(SimParams p, SimState* state)
             kz[i] *= kc[i] / kc_norm;
 
             // do time integration
-            fp_t dk_dt = (omega_pe(r[i]) / omega[i]) * domega_dr(r[i]) * C::c_r;
+            // fp_t dk_dt = (omega_pe(r[i]) / omega[i]) * domega_dr(r[i]) * C::c_r;
+            fp_t om[2];
+            omega_pe_dr(r[i], om);
+            fp_t dk_dt = (om[0] / omega[i]) * om[1] * C::c_r;
             kx[i] -= dk_dt * (rx[i] / r[i]) * dt_step;
             ky[i] -= dk_dt * (ry[i] / r[i]) * dt_step;
             kz[i] -= dk_dt * (rz[i] / r[i]) * dt_step;
@@ -471,7 +499,9 @@ int main(void)
     while (count >= Nparticles / 200)
     {
         advance_dtsave(params, &state);
+#if WRITE_OUT
         write_positions(&state);
+#endif
         count = count_active(&state);
         fp_t mean_r = 0.0;
         fp_t F = 0.0;
@@ -505,3 +535,5 @@ int main(void)
     free_particles(&state);
     return 0;
 }
+
+// cl /Ox /D "NDEGUG" /std:c++17 -nologo /Z7 -WL /MD /GL /arch:AVX2 /FC /EHsc Scatter.cpp /link /LTCG /OUT:scatter.exe /DEBUG:FULL
