@@ -1,61 +1,10 @@
-#define _USE_MATH_DEFINES
+#include "Constants.h"
 #include <cstdio>
 #include <cstring>
 #include "JasPP.hpp"
 #include "Random.hpp"
-#include "density_model.h"
-
-typedef double fp_t;
-// typedef float fp_t;
-#define WRITE_OUT 0
-
-namespace ConstantsF64
-{
-    constexpr f64 Rs = 6.96e10;
-    constexpr f64 c = 2.998e10;
-    constexpr f64 c_r = c / Rs;
-    constexpr f64 c_s = 2e7 / Rs;
-    constexpr f64 au = 215.0;
-    constexpr f64 Pi = M_PI;
-    constexpr f64 TwoPi = 2.0 * M_PI;
-}
-namespace ConstantsF32
-{
-    constexpr float Rs = 6.96e10f;
-    constexpr float c = 2.998e10f;
-    constexpr float c_r = c / Rs;
-    constexpr float c_s = 2e7f / Rs;
-    constexpr float au = 215.0f;
-    constexpr float Pi = M_PI;
-    constexpr float TwoPi = 2.0f * M_PI;
-}
-
-template <typename T>
-constexpr T square(T x)
-{
-    return x * x;
-}
-
-template <typename T>
-constexpr T cube(T x)
-{
-    return x * x * x;
-}
-
-template <typename T>
-constexpr T min(T a, T b)
-{
-    return a <= b ? a : b;
-}
-
-template <typename T>
-constexpr T max(T a, T b)
-{
-    return a >= b ? a : b;
-}
-
-namespace Constants = ConstantsF64;
-// namespace Constants = ConstantsF32;
+#include "DensityModel.h"
+#include "ScatteringModel.h"
 
 template <typename RandState>
 struct BaseSimState
@@ -138,29 +87,6 @@ inline void omega_pe_dr(fp_t r, fp_t* result)
 {
     result[0] = omega_pe(r);
     result[1] = domega_dr(r);
-}
-
-fp_t nu_scat_krupar(fp_t r, fp_t omega, fp_t eps)
-{
-    constexpr fp_t Third = 1.0 / 3.0;
-    constexpr fp_t TwoThird = 2.0 / 3.0;
-    namespace C = Constants;
-    // inner turbulence scale
-    fp_t l_i = r * 1e5;
-    // outer turbulence scale
-    fp_t l_0 = 0.23 * 6.9e10 * std::pow(r, 0.82);
-
-    fp_t w_pe = omega_pe(r);
-    fp_t w_pe2 = square(w_pe);
-    fp_t w_pe4 = square(w_pe2);
-    fp_t nu_s = C::Pi * square(eps) / (std::pow(l_i, Third) * std::pow(l_0, TwoThird));
-    nu_s *= w_pe4 * C::c / omega / std::pow(square(omega) - w_pe2, 1.5);
-    return nu_s;
-}
-
-fp_t nu_scat(fp_t r, fp_t omega, fp_t eps)
-{
-    return nu_scat_krupar(r, omega, eps);
 }
 
 SimState init_particles(int Nparticles, SimParams* p)

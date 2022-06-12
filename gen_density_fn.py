@@ -23,12 +23,16 @@ class InlineC99CodeGen(C99CodeGen):
         code_lines = ['{}\n'.format(l) for l in code_lines]
         return code_lines
 
-file_opening = """#ifdef __cplusplus
+file_opening = """#if !defined(DENSITY_MODEL_H)
+#define DENSITY_MODEL_H
+#ifdef __cplusplus
 extern "C" {
 #endif
 """
 file_closing = """#ifdef __cplusplus
 }
+#endif
+#else
 #endif
 """
 
@@ -43,7 +47,7 @@ if __name__ == '__main__':
         ('density_r', optim(density_r)),
         ('omega_pe', optim(omega_pe_r)),
         ('domega_dr', optim(domega_dr)),
-        ], prefix="density_model", header=False, empty=False, code_gen=gen)
+        ], prefix="DensityModel", header=False, empty=False, code_gen=gen)
 
     filename = source[0].replace('.c', '.h')
     with open(filename, 'w') as f:

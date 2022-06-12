@@ -1,3 +1,5 @@
+#if !defined(DENSITY_MODEL_H)
+#define DENSITY_MODEL_H
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,4 +22,6 @@ inline double domega_dr(double r) {
 }
 #ifdef __cplusplus
 }
+#endif
+#else
 #endif
