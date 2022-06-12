@@ -207,6 +207,7 @@ print, 'Stopping distance for calculations=',R_stop,' R_sun'
 ;stop
 ;while ((T LE tmax) AND (N_elements(r) GE 10)) DO begin
 
+TIC
 while (N_elements(r) GE N/200) DO begin
 
 
@@ -439,6 +440,7 @@ IF N_elements(where(r GE r_stop,/NULL)) GE 1 THEN BEGIN
   ENDIF
 
 endwhile
+TOC
 
 r_free=sqrt((rxx-rxx0)^2+(ryy-ryy0)^2+(rzz-rzz0)^2)
 rr=sqrt(rxx^2+ryy^2+rzz^2)

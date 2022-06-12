@@ -1,6 +1,5 @@
-from xml import dom
 import sympy as sp
-from sympy.utilities.codegen import codegen
+from sympy.utilities.codegen import codegen, C99CodeGen
 from sympy.codegen.rewriting import create_expand_pow_optimization, optimize, optims_c99
 
 def density_fn(r):
@@ -11,28 +10,43 @@ def density_fn(r):
 def omega_pe(r):
     return 8.98e3 * sp.sqrt(density_fn(r)) * 2.0 * sp.pi
 
-def zero(r):
-    return r - r
-
-def omega_pe_dr(r):
-    expr = omega_pe(r)
-    dexpr = sp.diff(expr, r)
-    return sp.Array([expr, dexpr])
-
-
 def optim(expr):
     return optimize(create_expand_pow_optimization(16)(expr), optims_c99)
+
+class InlineC99CodeGen(C99CodeGen):
+    def _get_routine_opening(self, routine):
+        return [f"inline {super()._get_routine_opening(routine)[0]}"]
+
+    def _preprocessor_statements(self, prefix):
+        code_lines = []
+        code_lines.extend(self.preprocessor_statements)
+        code_lines = ['{}\n'.format(l) for l in code_lines]
+        return code_lines
+
+file_opening = """#ifdef __cplusplus
+extern "C" {
+#endif
+"""
+file_closing = """#ifdef __cplusplus
+}
+#endif
+"""
+
 if __name__ == '__main__':
     r = sp.symbols('r')
     density_r = density_fn(r)
     omega_pe_r = omega_pe(r)
     domega_dr = sp.diff(omega_pe(r), r)
-    omega_pe_dr_expr = omega_pe_dr(r)
+
+    gen = InlineC99CodeGen(cse=True)
     source, header = codegen([
         ('density_r', optim(density_r)),
         ('omega_pe', optim(omega_pe_r)),
         ('domega_dr', optim(domega_dr)),
-        ('omega_pe_dr', omega_pe_dr_expr),
-        ], "C99", "density_model", header=False, empty=False)
-    with open(source[0], 'w') as f:
-        f.write('\n'.join(source[1].split('\n')[1:]))
+        ], prefix="density_model", header=False, empty=False, code_gen=gen)
+
+    filename = source[0].replace('.c', '.h')
+    with open(filename, 'w') as f:
+        f.write(file_opening)
+        f.write(source[1])
+        f.write(file_closing)

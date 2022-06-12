@@ -3,6 +3,7 @@
 #include <cstring>
 #include "JasPP.hpp"
 #include "Random.hpp"
+#include "density_model.h"
 
 typedef double fp_t;
 // typedef float fp_t;
@@ -133,46 +134,6 @@ SimParams default_params()
     return result;
 }
 
-#if 0
-fp_t density_r(fp_t r)
-{
-    namespace C = Constants;
-    // Low corona (144km / Rs)
-    constexpr fp_t h0 = 144e5 / C::Rs;
-    // 20 arcsec
-    constexpr fp_t h1 = 20.0 / 960.0;
-
-    const fp_t nc = 3e11 * std::exp(-(r-1.0) / h1);
-    const fp_t r14 = std::pow(r, 14.0);
-    const fp_t r6 = std::pow(r, 6.0);
-    const fp_t r23 = std::pow(r, 2.3);
-    // Power-law approximation of Parker model.
-    return 4.8e9/r14 + 3e8/r6 + 1.39e6/r23 + nc;
-}
-
-fp_t omega_pe(fp_t r)
-{
-    namespace C = Constants;
-    return 8.98e3 * std::sqrt(density_r(r)) * C::TwoPi;
-}
-
-fp_t domega_dr(fp_t r)
-{
-    // NOTE(cmo): This is a very different approach taken compared to the
-    // original, and will need some proper checking at some point. Possibly just
-    // autogenerate correct analytic case with sympy?
-    constexpr fp_t StepSize = 0.001;
-    fp_t rIn = (1.0 - StepSize) * r;
-    fp_t rOut = (1.0 + StepSize) * r;
-
-    return (omega_pe(rOut) - omega_pe(rIn)) / (rOut - rIn);
-}
-#else
-extern "C"
-{
-#include "density_model.c"
-}
-#endif
 inline void omega_pe_dr(fp_t r, fp_t* result)
 {
     result[0] = omega_pe(r);
