@@ -254,7 +254,11 @@ inline void copy_jump(Xoro256StateSoa* state, int32_t copyto, int32_t copyfrom)
 
 inline fp_t u64_to_unit_T(uint64_t x)
 {
+#ifdef ISPC
+    return (fp_t)((x >> 11) * (1.0d / (1ULL << 53)));
+#else
     return (fp_t)((x >> 11) * (1.0 / (1ULL << 53)));
+#endif
 }
 
 struct BoxMullerResult
@@ -265,7 +269,11 @@ struct BoxMullerResult
 
 inline BoxMullerResult box_muller(fp_t u0, fp_t u1)
 {
+#ifdef ISPC
+    fp_t prefactor = sqrt(-2.0d * log(u0));
+#else
     fp_t prefactor = sqrt(-2.0 * log(u0));
+#endif
     fp_t c = cos(TwoPi * u1);
     fp_t s = sin(TwoPi * u1);
 

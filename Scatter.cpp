@@ -5,9 +5,8 @@
 #include "Memory.hpp"
 #include "JasPP.hpp"
 #include "Random.h"
-// #include "DensityModel.h"
-// #include "ScatteringModel.h"
 #include "DensityScatteringModel.h"
+#include <cmath>
 
 constexpr size_t DefaultAlign = 32;
 
@@ -357,8 +356,6 @@ int main(void)
         printf("F: %f\n", F);
         printf("%f, %f, %e\n", mean_kx, mean_ky, mean_kz);
         printf("%f\n", mean_nus);
-        break;
-        // count = 0;
     }
 
     free_particles(&state);

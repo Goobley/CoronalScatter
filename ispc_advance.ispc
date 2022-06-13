@@ -63,6 +63,7 @@ export void advance_dtsave_ispc(uniform SimParams* uniform p, uniform SimState* 
             fp_t wy = res0.z1 * sqrt_dt;
             fp_t wz = res1.z0 * sqrt_dt;
 
+
             // rotate to r-aligned
             fp_t phi = atan2(ry[i], rx[i]);
             fp_t sintheta = sqrt(1.0d - square(rz[i]) / square(r[i]));
@@ -159,6 +160,5 @@ export void advance_dtsave_ispc(uniform SimParams* uniform p, uniform SimState* 
                 // TODO(cmo): Add stop time for particle
         }
         iters += 1;
-        break;
     }
 }
