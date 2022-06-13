@@ -1,8 +1,10 @@
 #if !defined(CONSTANTS_H)
 #define CONSTANTS_H
 
+#ifndef ISPC
 #define _USE_MATH_DEFINES
 #include <math.h>
+#endif
 
 typedef double fp_t;
 typedef double f64;
@@ -13,8 +15,8 @@ inline const fp_t c_light = 2.998e10;
 inline const fp_t c_r = c_light / Rs;
 inline const fp_t c_s = 2e7 / Rs;
 inline const fp_t au = 215.0;
-inline const fp_t Pi = M_PI;
-inline const fp_t TwoPi = 2.0 * M_PI;
+inline const fp_t Pi = 3.14159265358979323846;
+inline const fp_t TwoPi = 2.0 * Pi;
 
 #ifdef __cplusplus
 namespace ConstantsF64
@@ -24,8 +26,8 @@ namespace ConstantsF64
     constexpr f64 c_r = c / Rs;
     constexpr f64 c_s = 2e7 / Rs;
     constexpr f64 au = 215.0;
-    constexpr f64 Pi = M_PI;
-    constexpr f64 TwoPi = 2.0 * M_PI;
+    constexpr f64 Pi = 3.14159265358979323846;
+    constexpr f64 TwoPi = 2.0 * Pi;
 }
 namespace ConstantsF32
 {
@@ -34,8 +36,8 @@ namespace ConstantsF32
     constexpr float c_r = c / Rs;
     constexpr float c_s = 2e7f / Rs;
     constexpr float au = 215.0f;
-    constexpr float Pi = M_PI;
-    constexpr float TwoPi = 2.0f * M_PI;
+    constexpr float Pi = 3.14159265358979323846f;
+    constexpr float TwoPi = 2.0 * Pi;
 }
 
 template <typename T>
@@ -74,16 +76,6 @@ inline fp_t square(fp_t x)
 inline fp_t cube(fp_t x)
 {
     return x * x * x;
-}
-
-inline min(fp_t a, fp_t b)
-{
-    return a <= b ? a : b;
-}
-
-inline max(fp_t a, fp_t b)
-{
-    return a >= b ? a : b;
 }
 
 #endif

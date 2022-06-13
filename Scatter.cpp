@@ -1,71 +1,15 @@
 #include "Constants.h"
 #include <cstdio>
 #include <cstring>
+#include "SimState.h"
+#include "Memory.hpp"
 #include "JasPP.hpp"
-#include "Random.hpp"
-#include "DensityModel.h"
-#include "ScatteringModel.h"
+#include "Random.h"
+// #include "DensityModel.h"
+// #include "ScatteringModel.h"
+#include "DensityScatteringModel.h"
 
-template <typename RandState>
-struct BaseSimState
-{
-    int64_t Nparticles;
-    fp_t time;
-    int32_t* active;
-
-    fp_t* r;
-    fp_t* rx;
-    fp_t* ry;
-    fp_t* rz;
-
-    fp_t* kc;
-    fp_t* kx;
-    fp_t* ky;
-    fp_t* kz;
-
-    fp_t* omega;
-    fp_t* nu_s;
-
-    RandState* randStates;
-};
-
-using SimState = BaseSimState<Xoroshiro256StarStar::Xoro256State>;
-namespace Rand = Xoroshiro256StarStar;
-using RandomTransforms::BoxMullerResult;
-typedef Rand::Xoro256State RandState;
-
-fp_t draw_u(RandState* s)
-{
-    uint64_t i = Rand::next(s);
-    return RandomTransforms::u64_to_unit_T<fp_t>(i);
-}
-
-BoxMullerResult<fp_t> draw_2_n(RandState* s)
-{
-    uint64_t i0 = next(s);
-    uint64_t i1 = next(s);
-
-    fp_t u0 = RandomTransforms::u64_to_unit_T<fp_t>(i0);
-    fp_t u1 = RandomTransforms::u64_to_unit_T<fp_t>(i1);
-
-    return RandomTransforms::box_muller(u0, u1);
-}
-
-struct SimParams
-{
-    fp_t eps;
-    fp_t Rinit;
-    fp_t Rstop;
-    fp_t aniso;
-    fp_t fRatio;
-    fp_t asym;
-    fp_t theta0;
-    fp_t omega0;
-    fp_t nu_s0;
-    fp_t dt0;
-    fp_t dtSave;
-    uint64_t seed;
-};
+constexpr size_t DefaultAlign = 32;
 
 SimParams default_params()
 {
@@ -91,31 +35,30 @@ inline void omega_pe_dr(fp_t r, fp_t* result)
 
 SimState init_particles(int Nparticles, SimParams* p)
 {
-    // TODO(cmo): Switch to aligned allocation
     SimState result;
     result.Nparticles = Nparticles;
     result.time = 0.0;
-    result.active = (int32_t*)calloc(Nparticles, sizeof(int32_t));
+    result.active = CmoMemory::aligned_alloc<int32_t>(Nparticles, DefaultAlign);
     for (int i = 0; i < Nparticles; ++i)
         result.active[i] = 1;
 
-    result.r  = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.rx = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.ry = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.rz = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.kc = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.kx = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.ky = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.kz = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.omega = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.nu_s = (fp_t*)calloc(Nparticles, sizeof(fp_t));
+    result.r  = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.rx = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.ry = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.rz = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.kc = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.kx = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.ky = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.kz = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.omega = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
+    result.nu_s = CmoMemory::aligned_alloc<fp_t>(Nparticles, DefaultAlign);
 
-    result.randStates = (RandState*)calloc(Nparticles, sizeof(RandState));
+    result.randState = alloc_n_states(Nparticles);
 
     // NOTE(cmo): Seed states
-    result.randStates[0] = Rand::seed_state(p->seed);
+    seed_state(result.randState, 0, p->seed);
     for (int i = 1; i < Nparticles; ++i)
-        result.randStates[i] = Rand::copy_jump(&result.randStates[i-1]);
+        copy_jump(result.randState, i, i-1);
 
     // NOTE(cmo): Distribute initial particles
     namespace C = Constants;
@@ -141,8 +84,8 @@ SimState init_particles(int Nparticles, SimParams* p)
     fp_t mean_kz = 0.0;
     for (int i = 0; i < Nparticles; ++i)
     {
-        fp_t mu = draw_u(&result.randStates[i]);
-        fp_t phi = draw_u(&result.randStates[i]) * C::TwoPi;
+        fp_t mu = draw_u(result.randState, i);
+        fp_t phi = draw_u(result.randState, i) * C::TwoPi;
         mean_mu += mu;
 
         result.kc[i] = kc0;
@@ -174,18 +117,18 @@ SimState init_particles(int Nparticles, SimParams* p)
 
 void free_particles(SimState* state)
 {
-    free(state->active);
-    free(state->r);
-    free(state->rx);
-    free(state->ry);
-    free(state->rz);
-    free(state->kc);
-    free(state->kx);
-    free(state->ky);
-    free(state->kz);
-    free(state->omega);
-    free(state->nu_s);
-    free(state->randStates);
+    CmoMemory::deallocate(state->active);
+    CmoMemory::deallocate(state->r);
+    CmoMemory::deallocate(state->rx);
+    CmoMemory::deallocate(state->ry);
+    CmoMemory::deallocate(state->rz);
+    CmoMemory::deallocate(state->kc);
+    CmoMemory::deallocate(state->kx);
+    CmoMemory::deallocate(state->ky);
+    CmoMemory::deallocate(state->kz);
+    CmoMemory::deallocate(state->omega);
+    CmoMemory::deallocate(state->nu_s);
+    free_states(state->randState);
 }
 
 void advance_dtsave(SimParams p, SimState* state)
@@ -235,8 +178,8 @@ void advance_dtsave(SimParams p, SimState* state)
             fp_t dry_dt = C::c_r / omega[i] * ky[i];
             fp_t drz_dt = C::c_r / omega[i] * kz[i];
 
-            auto res0 = draw_2_n(&state->randStates[i]);
-            auto res1 = draw_2_n(&state->randStates[i]);
+            auto res0 = draw_2_n(state->randState, i);
+            auto res1 = draw_2_n(state->randState, i);
             fp_t wx = res0.z0 * sqrt_dt;
             fp_t wy = res0.z1 * sqrt_dt;
             fp_t wz = res1.z0 * sqrt_dt;
@@ -339,6 +282,7 @@ void advance_dtsave(SimParams p, SimState* state)
     }
 }
 
+extern "C" void advance_dtsave_ispc(SimParams* p, SimState* state);
 
 int count_active(SimState* s)
 {
@@ -364,8 +308,6 @@ void write_positions(SimState* s)
 }
 
 
-// TODO(cmo): Check if we wrap over random state
-// TODO(cmo): Optical depth
 int main(void)
 {
     constexpr int Nparticles = 1024;
@@ -385,10 +327,9 @@ int main(void)
     write_positions(&state);
     while (count >= Nparticles / 200)
     {
-        advance_dtsave(params, &state);
-#if WRITE_OUT
-        write_positions(&state);
-#endif
+        // advance_dtsave(params, &state);
+        advance_dtsave_ispc(&params, &state);
+        // write_positions(&state);
         count = count_active(&state);
         fp_t mean_r = 0.0;
         fp_t F = 0.0;
@@ -416,6 +357,7 @@ int main(void)
         printf("F: %f\n", F);
         printf("%f, %f, %e\n", mean_kx, mean_ky, mean_kz);
         printf("%f\n", mean_nus);
+        break;
         // count = 0;
     }
 
