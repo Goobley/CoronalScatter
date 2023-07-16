@@ -23,12 +23,23 @@ class InlineC99CodeGen(C99CodeGen):
         code_lines = ['{}\n'.format(l) for l in code_lines]
         return code_lines
 
+class InlineCudaCodeGen(C99CodeGen):
+    def _get_routine_opening(self, routine):
+        return [f"__host__ __device__ inline {super()._get_routine_opening(routine)[0]}"]
+
+    def _preprocessor_statements(self, prefix):
+        code_lines = []
+        code_lines.extend(self.preprocessor_statements)
+        code_lines = ['{}\n'.format(l) for l in code_lines]
+        return code_lines
+
 file_opening = """#if !defined(DENSITY_MODEL_H)
 #define DENSITY_MODEL_H
 #ifdef __cplusplus
 extern "C" {
 #endif
 """
+file_opening_cuda = "#include \"cuda_runtime.h\"\n" + file_opening
 file_closing = """#ifdef __cplusplus
 }
 #endif
@@ -52,5 +63,18 @@ if __name__ == '__main__':
     filename = source[0].replace('.c', '.h')
     with open(filename, 'w') as f:
         f.write(file_opening)
+        f.write(source[1])
+        f.write(file_closing)
+
+    gen = InlineCudaCodeGen(cse=True)
+    source, header = codegen([
+        ('density_r', optim(density_r)),
+        ('omega_pe', optim(omega_pe_r)),
+        ('domega_dr', optim(domega_dr)),
+        ], prefix="DensityModelCuda", header=False, empty=False, code_gen=gen)
+
+    filename = source[0].replace('.c', '.h')
+    with open(filename, 'w') as f:
+        f.write(file_opening_cuda)
         f.write(source[1])
         f.write(file_closing)

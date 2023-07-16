@@ -3,9 +3,12 @@
 #include <cstring>
 #include "JasPP.hpp"
 #include "Random.hpp"
-#include "DensityModel.h"
+#include "DensityModelCuda.h"
 #include "ScatteringModel.h"
 #include "cnpy.h"
+#include <cuda_runtime.h>
+#include <device_launch_parameters.h>
+#include "helper_cuda.h"
 
 template <typename RandState>
 struct BaseSimState
@@ -41,7 +44,7 @@ fp_t draw_u(RandState* s)
     return RandomTransforms::u64_to_unit_T<fp_t>(i);
 }
 
-BoxMullerResult<fp_t> draw_2_n(RandState* s)
+CudaFn BoxMullerResult<fp_t> draw_2_n(RandState* s)
 {
     uint64_t i0 = next(s);
     uint64_t i1 = next(s);
@@ -92,7 +95,7 @@ SimParams default_params()
     return result;
 }
 
-inline void omega_pe_dr(fp_t r, fp_t* result)
+CudaFn inline void omega_pe_dr(fp_t r, fp_t* result)
 {
     result[0] = omega_pe(r);
     result[1] = domega_dr(r);
@@ -169,28 +172,40 @@ SimRadii compute_sim_radii(SimParams p, SimState* s)
     return result;
 }
 
-SimState init_particles(int Nparticles, SimParams* p)
+SimState* init_particles(int Nparticles, SimParams* p)
 {
-    // TODO(cmo): Switch to aligned allocation
-    SimState result;
+    SimState* true_result;
+    checkCudaErrors(cudaMallocManaged(&true_result, sizeof(SimState)));
+    SimState& result(*true_result);
     result.Nparticles = Nparticles;
     result.time = 0.0;
-    result.active = (int32_t*)calloc(Nparticles, sizeof(int32_t));
+    checkCudaErrors(cudaMallocManaged(&result.active, Nparticles * sizeof(int32_t)));
     for (int i = 0; i < Nparticles; ++i)
         result.active[i] = 1;
 
-    result.r  = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.rx = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.ry = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.rz = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.kc = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.kx = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.ky = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.kz = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.omega = (fp_t*)calloc(Nparticles, sizeof(fp_t));
-    result.nu_s = (fp_t*)calloc(Nparticles, sizeof(fp_t));
+    const int allocSize = Nparticles * sizeof(fp_t);
+    checkCudaErrors(cudaMallocManaged(&result.r, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.rx, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.ry, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.rz, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.kc, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.kx, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.ky, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.kz, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.omega, allocSize));
+    checkCudaErrors(cudaMallocManaged(&result.nu_s, allocSize));
+    memset(result.r, 0, allocSize);
+    memset(result.rx, 0, allocSize);
+    memset(result.ry, 0, allocSize);
+    memset(result.rz, 0, allocSize);
+    memset(result.kc, 0, allocSize);
+    memset(result.kx, 0, allocSize);
+    memset(result.ky, 0, allocSize);
+    memset(result.kz, 0, allocSize);
+    memset(result.omega, 0, allocSize);
+    memset(result.nu_s, 0, allocSize);
 
-    result.randStates = (RandState*)calloc(Nparticles, sizeof(RandState));
+    checkCudaErrors(cudaMallocManaged(&result.randStates, Nparticles * sizeof(RandState)));
 
     // NOTE(cmo): Seed states
     result.randStates[0] = Rand::seed_state(p->seed);
@@ -255,177 +270,181 @@ SimState init_particles(int Nparticles, SimParams* p)
     p->dtSave = 2e7 / omega;
     p->dtSave = (p->Rstop - p->Rinit) / C::c_r / 10.0;
 
-    return result;
+    return true_result;
 }
 
 
 void free_particles(SimState* state)
 {
-    free(state->active);
-    free(state->r);
-    free(state->rx);
-    free(state->ry);
-    free(state->rz);
-    free(state->kc);
-    free(state->kx);
-    free(state->ky);
-    free(state->kz);
-    free(state->omega);
-    free(state->nu_s);
-    free(state->randStates);
+    cudaFree(state->active);
+    cudaFree(state->r);
+    cudaFree(state->rx);
+    cudaFree(state->ry);
+    cudaFree(state->rz);
+    cudaFree(state->kc);
+    cudaFree(state->kx);
+    cudaFree(state->ky);
+    cudaFree(state->kz);
+    cudaFree(state->omega);
+    cudaFree(state->nu_s);
+    cudaFree(state->randStates);
+    cudaFree(state);
 }
 
-void advance_dtsave(SimParams p, SimState* state)
-{
+__global__ void advance_dtsave_cuda(SimParams p, SimState* state) {
+    // NOTE(cmo): This kernel doesn't advance state->time (as it is shared),
+    // but does move all particles by p.dtSave (or until their exit).
+    // Once out of this kernel, increment state->time in host code.
     JasUnpack((*state), Nparticles, r, rx, ry, rz);
     JasUnpack((*state), kc, kx, ky, kz);
     JasUnpack((*state), omega, nu_s);
     namespace C = Constants;
     fp_t time0 = state->time;
+    fp_t particle_time = state->time;
     fp_t dt = p.dtSave;
 
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if (idx >= Nparticles)
+    {
+        return;
+    }
+
+    if (!state->active[idx])
+    {
+        return;
+    }
+
     int iters = 0;
-    while (state->time - time0 < dt)
+    while (particle_time - time0 < dt)
     {
         fp_t dt_step = p.dt0;
-        if (std::abs(time0 + dt - state->time) < 1e-6)
+        if (abs(time0 + dt - particle_time) < fpl(1e-6))
             break;
         // NOTE(cmo): Compute state vars and timestep
-        for (int i = 0; i < Nparticles; ++i)
-        {
-            if (!state->active[i])
-                continue;
+        r[idx] = sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
+        kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        omega[idx] = sqrt(square(omega_pe(r[idx])) + square(kc[idx]));
 
-            r[i] = std::sqrt(square(rx[i]) + square(ry[i]) + square(rz[i]));
-            kc[i] = std::sqrt(square(kx[i]) + square(ky[i]) + square(kz[i]));
-            omega[i] = std::sqrt(square(omega_pe(r[i])) + square(kc[i]));
+        nu_s[idx] = nu_scat(r[idx], omega[idx], p.eps);
+        nu_s[idx] = min(nu_s[idx], p.nu_s0);
 
-            nu_s[i] = nu_scat(r[i], omega[i], p.eps);
-            nu_s[i] = min(nu_s[i], p.nu_s0);
+        fp_t dt_ref = abs(kc[idx] / (domega_dr(r[idx]) * C::c_r) / fpl(20.0));
+        fp_t dt_dr = r[idx] / (C::c_r / p.omega0 * kc[idx]) / fpl(20.0);
+        dt_step = min(dt_step, fp_t(fpl(0.1) / nu_s[idx]));
+        dt_step = min(dt_step, dt_ref);
+        dt_step = min(dt_step, dt_dr);
 
-            fp_t dt_ref = std::abs(kc[i] / (domega_dr(r[i]) * C::c_r) / 20.0);
-            fp_t dt_dr = r[i] / (C::c_r / p.omega0 * kc[i]) / 20.0;
-            dt_step = min(dt_step, fp_t(0.1 / nu_s[i]));
-            dt_step = min(dt_step, dt_ref);
-            dt_step = min(dt_step, dt_dr);
-        }
-        if (state->time + dt_step > time0 + dt)
-            dt_step = time0 + dt - state->time;
+        if (particle_time + dt_step > time0 + dt)
+            dt_step = time0 + dt - particle_time;
 
-        fp_t sqrt_dt = std::sqrt(dt_step);
-        for (int i = 0; i < Nparticles; ++i)
-        {
-            if (!state->active[i])
-                continue;
+        fp_t sqrt_dt = sqrt(dt_step);
 
-            fp_t drx_dt = C::c_r / omega[i] * kx[i];
-            fp_t dry_dt = C::c_r / omega[i] * ky[i];
-            fp_t drz_dt = C::c_r / omega[i] * kz[i];
+        fp_t drx_dt = C::c_r / omega[idx] * kx[idx];
+        fp_t dry_dt = C::c_r / omega[idx] * ky[idx];
+        fp_t drz_dt = C::c_r / omega[idx] * kz[idx];
 
-            auto res0 = draw_2_n(&state->randStates[i]);
-            auto res1 = draw_2_n(&state->randStates[i]);
-            fp_t wx = res0.z0 * sqrt_dt;
-            fp_t wy = res0.z1 * sqrt_dt;
-            fp_t wz = res1.z0 * sqrt_dt;
+        auto res0 = draw_2_n(&state->randStates[idx]);
+        auto res1 = draw_2_n(&state->randStates[idx]);
+        fp_t wx = res0.z0 * sqrt_dt;
+        fp_t wy = res0.z1 * sqrt_dt;
+        fp_t wz = res1.z0 * sqrt_dt;
 
-            // rotate to r-aligned
-            fp_t phi = std::atan2(ry[i], rx[i]);
-            fp_t sintheta = std::sqrt(1.0 - square(rz[i]) / square(r[i]));
-            fp_t costheta = rz[i] / r[i];
-            fp_t sinphi = std::sin(phi);
-            fp_t cosphi = std::cos(phi);
+        // rotate to r-aligned
+        fp_t phi = atan2(ry[idx], rx[idx]);
+        fp_t sintheta = sqrt(fpl(1.0) - square(rz[idx]) / square(r[idx]));
+        fp_t costheta = rz[idx] / r[idx];
+        fp_t sinphi = sin(phi);
+        fp_t cosphi = cos(phi);
 
-            fp_t kc_old = kc[i];
+        fp_t kc_old = kc[idx];
 
-            fp_t kc_x = - kx[i] * sinphi + ky[i] * cosphi;
-            fp_t kc_y = - kx[i] * costheta * cosphi
-                        - ky[i] * costheta * sinphi
-                        + kz[i] * sintheta;
-            fp_t kc_z =   kx[i] * sintheta * cosphi
-                        + ky[i] * sintheta * sinphi
-                        + kz[i] * costheta;
+        fp_t kc_x = - kx[idx] * sinphi + ky[idx] * cosphi;
+        fp_t kc_y = - kx[idx] * costheta * cosphi
+                    - ky[idx] * costheta * sinphi
+                    + kz[idx] * sintheta;
+        fp_t kc_z =   kx[idx] * sintheta * cosphi
+                    + ky[idx] * sintheta * sinphi
+                    + kz[idx] * costheta;
 
-            // scatter
-            fp_t kw = wx*kc_x + wy*kc_y + wz*kc_z*p.aniso;
-            fp_t Akc = std::sqrt(square(kc_x) + square(kc_y) + square(kc_z) * square(p.aniso));
-            fp_t z_asym = p.asym;
-            if (kc_z <= 0.0)
-                z_asym = (2.0 - p.asym);
-            z_asym *= square(kc[i] / Akc);
+        // scatter
+        fp_t kw = wx*kc_x + wy*kc_y + wz*kc_z*p.aniso;
+        fp_t Akc = sqrt(square(kc_x) + square(kc_y) + square(kc_z) * square(p.aniso));
+        fp_t z_asym = p.asym;
+        if (kc_z <= fpl(0.0))
+            z_asym = (fpl(2.0) - p.asym);
+        z_asym *= square(kc[idx] / Akc);
 
-            fp_t aniso2 = square(p.aniso);
-            fp_t aniso4 = square(aniso2);
-            fp_t Akc2 = square(Akc);
-            fp_t Akc3 = cube(Akc);
-            fp_t Aperp = nu_s[i] * z_asym * kc[i] / Akc3
-                         * (- (1.0 + aniso2) * Akc2
-                            + 3.0 * aniso2 * (aniso2 - 1.0) * square(kc_z))
-                         * p.aniso;
-            fp_t Apara = nu_s[i] * z_asym * kc[i] / Akc3
-                         * ((-3.0 * aniso4 + aniso2) * Akc2
-                            + 3.0 * aniso4 * (aniso2 - 1.0) * square(kc_z))
-                         * p.aniso;
+        fp_t aniso2 = square(p.aniso);
+        fp_t aniso4 = square(aniso2);
+        fp_t Akc2 = square(Akc);
+        fp_t Akc3 = cube(Akc);
+        fp_t Aperp = nu_s[idx] * z_asym * kc[idx] / Akc3
+                        * (- (fpl(1.0) + aniso2) * Akc2
+                        + fpl(3.0) * aniso2 * (aniso2 - fpl(1.0)) * square(kc_z))
+                        * p.aniso;
+        fp_t Apara = nu_s[idx] * z_asym * kc[idx] / Akc3
+                        * ((fpl(-3.0) * aniso4 + aniso2) * Akc2
+                        + fpl(3.0) * aniso4 * (aniso2 - fpl(1.0)) * square(kc_z))
+                        * p.aniso;
 
-            fp_t g0 = std::sqrt(nu_s[i] * square(kc[i]));
-            fp_t Ag0 = g0 * std::sqrt(z_asym * p.aniso);
+        fp_t g0 = sqrt(nu_s[idx] * square(kc[idx]));
+        fp_t Ag0 = g0 * sqrt(z_asym * p.aniso);
 
-            kc_x +=  Aperp * kc_x * dt_step
-                   + Ag0 * (wx - kc_x * kw / Akc2);
-            kc_y +=  Aperp * kc_y * dt_step
-                   + Ag0 * (wy - kc_y * kw / Akc2);
-            kc_z +=  Apara * kc_z * dt_step
-                   + Ag0 * (wz - kc_z * kw * p.aniso / Akc2) * p.aniso;
+        kc_x +=  Aperp * kc_x * dt_step
+                + Ag0 * (wx - kc_x * kw / Akc2);
+        kc_y +=  Aperp * kc_y * dt_step
+                + Ag0 * (wy - kc_y * kw / Akc2);
+        kc_z +=  Apara * kc_z * dt_step
+                + Ag0 * (wz - kc_z * kw * p.aniso / Akc2) * p.aniso;
 
-            // rotate back to cartesian
+        // rotate back to cartesian
 
-            kx[i] = -kc_x*sinphi - kc_y*costheta*cosphi + kc_z*sintheta*cosphi;
-            ky[i] =  kc_x*cosphi - kc_y*costheta*sinphi + kc_z*sintheta*sinphi;
-            kz[i] =  kc_y*sintheta + kc_z*costheta;
+        kx[idx] = -kc_x*sinphi - kc_y*costheta*cosphi + kc_z*sintheta*cosphi;
+        ky[idx] =  kc_x*cosphi - kc_y*costheta*sinphi + kc_z*sintheta*sinphi;
+        kz[idx] =  kc_y*sintheta + kc_z*costheta;
 
-            fp_t kc_norm = std::sqrt(square(kx[i]) + square(ky[i]) + square(kz[i]));
-            kx[i] *= kc[i] / kc_norm;
-            ky[i] *= kc[i] / kc_norm;
-            kz[i] *= kc[i] / kc_norm;
+        fp_t kc_norm = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        kx[idx] *= kc[idx] / kc_norm;
+        ky[idx] *= kc[idx] / kc_norm;
+        kz[idx] *= kc[idx] / kc_norm;
 
-            // do time integration
-            // fp_t dk_dt = (omega_pe(r[i]) / omega[i]) * domega_dr(r[i]) * C::c_r;
-            fp_t om[2];
-            omega_pe_dr(r[i], om);
-            fp_t dk_dt = (om[0] / omega[i]) * om[1] * C::c_r;
-            kx[i] -= dk_dt * (rx[i] / r[i]) * dt_step;
-            ky[i] -= dk_dt * (ry[i] / r[i]) * dt_step;
-            kz[i] -= dk_dt * (rz[i] / r[i]) * dt_step;
+        // do time integration
+        // fp_t dk_dt = (omega_pe(r[i]) / omega[i]) * domega_dr(r[i]) * C::c_r;
+        fp_t om[2];
+        omega_pe_dr(r[idx], om);
+        fp_t dk_dt = (om[0] / omega[idx]) * om[1] * C::c_r;
+        kx[idx] -= dk_dt * (rx[idx] / r[idx]) * dt_step;
+        ky[idx] -= dk_dt * (ry[idx] / r[idx]) * dt_step;
+        kz[idx] -= dk_dt * (rz[idx] / r[idx]) * dt_step;
 
-            rx[i] += drx_dt * dt_step;
-            ry[i] += dry_dt * dt_step;
-            rz[i] += drz_dt * dt_step;
+        rx[idx] += drx_dt * dt_step;
+        ry[idx] += dry_dt * dt_step;
+        rz[idx] += drz_dt * dt_step;
 
-            r[i] = std::sqrt(square(rx[i]) + square(ry[i]) + square(rz[i]));
-            kc[i] = std::sqrt(square(kx[i]) + square(ky[i]) + square(kz[i]));
+        r[idx] = sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
+        kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
 
-            // conserve frequency
-            // fp_t kc_new_old = kc_old / kc[i];
-            fp_t kc_new_old = std::sqrt(square(omega[i]) - square(omega_pe(r[i])));
-            kc_new_old /= kc[i];
-            // kc_new_old = 1.0;
-            kx[i] *= kc_new_old;
-            ky[i] *= kc_new_old;
-            kz[i] *= kc_new_old;
+        // conserve frequency
+        // fp_t kc_new_old = kc_old / kc[i];
+        fp_t kc_new_old = sqrt(square(omega[idx]) - square(omega_pe(r[idx])));
+        kc_new_old /= kc[idx];
+        // kc_new_old = 1.0;
+        kx[idx] *= kc_new_old;
+        ky[idx] *= kc_new_old;
+        kz[idx] *= kc_new_old;
 
 
-            kc[i] = std::sqrt(square(kx[i]) + square(ky[i]) + square(kz[i]));
-        }
-        state->time += dt_step;
+        kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        particle_time += dt_step;
 
-        for (int i = 0; i < Nparticles; ++i)
-        {
-            if (state->active[i] && (r[i] > p.Rstop))
-                state->active[i] = 0;
-        }
         iters += 1;
+        if (r[idx] > p.Rstop)
+        {
+            state->active[idx] = 0;
+            break;
+        }
     }
 }
-
 
 int count_active(SimState* s)
 {
@@ -474,11 +493,12 @@ void write_positions(SimState* s)
 
 // TODO(cmo): Check if we wrap over random state
 // TODO(cmo): Optical depth
-int main(void)
+int main(int argc, const char* argv[])
 {
-    constexpr int Nparticles = 1024;
+    findCudaDevice(argc, argv);
+    constexpr int Nparticles = 1024 * 128;
     SimParams params = default_params();
-    SimState state = init_particles(Nparticles, &params);
+    SimState* state = init_particles(Nparticles, &params);
 
     fp_t omega1 = omega_pe(1.75);
     fp_t omega2 = omega_pe(2.15);
@@ -487,19 +507,30 @@ int main(void)
     printf("omega: %f %f\n", omega1, omega2);
     // omega: 201297810.663404 103774832.114953
 
-    int count = count_active(&state);
-    printf("Time: %f s, Starting particles: %d\n", state.time, count);
+    int count = count_active(state);
+    printf("Time: %f s, Starting particles: %d\n", state->time, count);
+
+    // https://developer.nvidia.com/blog/cuda-pro-tip-occupancy-api-simplifies-launch-configuration/
+    int blockSize;
+    int minGridSize;
+    int gridSize;
+    cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, advance_dtsave_cuda);
+    gridSize = (Nparticles + blockSize - 1) / blockSize;
+    printf("CUDA Parameters: <<< %d, %d >>>\n", gridSize, blockSize);
 
 #ifdef WRITE_OUT
-    write_positions(&state);
+    write_positions(state);
 #endif
     while (count >= Nparticles / 200)
     {
-        advance_dtsave(params, &state);
+        // advance_dtsave(params, state);
+        advance_dtsave_cuda<<< gridSize, blockSize >>>(params, state);
+        cudaDeviceSynchronize();
+        state->time += params.dtSave;
 #ifdef WRITE_OUT
-        write_positions(&state);
+        write_positions(state);
 #endif
-        count = count_active(&state);
+        count = count_active(state);
         fp_t mean_r = 0.0;
         fp_t F = 0.0;
         fp_t mean_kz = 0.0;
@@ -508,12 +539,12 @@ int main(void)
         fp_t mean_nus = 0.0;
         for (int i = 0; i < Nparticles; ++i)
         {
-            mean_r += state.r[i];
-            F += std::sqrt(square(omega_pe(state.r[i])) + square(state.kc[i])) / state.omega[i];
-            mean_kx += state.kx[i];
-            mean_ky += state.ky[i];
-            mean_kz += state.kz[i];
-            mean_nus += state.nu_s[i];
+            mean_r += state->r[i];
+            F += std::sqrt(square(omega_pe(state->r[i])) + square(state->kc[i])) / state->omega[i];
+            mean_kx += state->kx[i];
+            mean_ky += state->ky[i];
+            mean_kz += state->kz[i];
+            mean_nus += state->nu_s[i];
         }
         mean_r /= Nparticles;
         F /= Nparticles;
@@ -522,14 +553,14 @@ int main(void)
         mean_kz /= Nparticles;
         mean_nus /= Nparticles;
 
-        printf("Time: %f s, living particles: %d, <r>: %f\n", state.time, count, mean_r);
+        printf("Time: %f s, living particles: %d, <r>: %f\n", state->time, count, mean_r);
         printf("F: %f\n", F);
         printf("%f, %f, %e\n", mean_kx, mean_ky, mean_kz);
         printf("%f\n", mean_nus);
         // count = 0;
     }
 
-    free_particles(&state);
+    free_particles(state);
     return 0;
 }
 

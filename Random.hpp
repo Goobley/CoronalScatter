@@ -2,9 +2,7 @@
 #define CMO_RANDOM_HPP
 
 #include <cmath>
-
-typedef double f64;
-
+#include "Constants.h"
 
 /*  Written in 2015 by Sebastiano Vigna (vigna@acm.org)
 
@@ -51,7 +49,7 @@ See <http://creativecommons.org/publicdomain/zero/1.0/>. */
    a 64-bit seed, we suggest to seed a splitmix64 generator and use its
    output to fill s. */
 
-static inline uint64_t rotl(const uint64_t x, int k) {
+static CudaFn inline uint64_t rotl(const uint64_t x, int k) {
     return (x << k) | (x >> (64 - k));
 }
 
@@ -71,7 +69,7 @@ Xoro256State seed_state(uint64_t x)
     return result;
 }
 
-uint64_t next(Xoro256State* state) {
+CudaFn uint64_t next(Xoro256State* state) {
     uint64_t* s = state->s;
     const uint64_t result = rotl(s[1] * 5, 7) * 9;
 
@@ -162,8 +160,9 @@ namespace RandomTransforms
 // NOTE(cmo): Based on the numba implementation
 // https://github.com/numba/numba/blob/main/numba/cuda/random.py
 template <typename T>
-T u64_to_unit_T(uint64_t x)
+CudaFn T u64_to_unit_T(uint64_t x)
 {
+    // NOTE(cmo): I believe the 1.0 should be left as double, not fpl.
     return T((x >> 11) * (1.0 / (UINT64_C(1) << 53)));
 }
 
@@ -175,12 +174,12 @@ struct BoxMullerResult
 };
 
 template <typename T>
-BoxMullerResult<T> box_muller(T u0, T u1)
+CudaFn BoxMullerResult<T> box_muller(T u0, T u1)
 {
-    constexpr T TwoPi = 2.0 * M_PI;
-    T prefactor = std::sqrt(T(-2.0) * std::log(u0));
-    T c = std::cos(TwoPi * u1);
-    T s = std::sin(TwoPi * u1);
+    constexpr T TwoPi = fpl(2.0) * M_PI;
+    T prefactor = sqrt(T(fpl(-2.0)) * log(u0));
+    T c = cos(TwoPi * u1);
+    T s = sin(TwoPi * u1);
 
     BoxMullerResult<T> result;
     result.z0 = prefactor * c;
@@ -189,10 +188,10 @@ BoxMullerResult<T> box_muller(T u0, T u1)
 }
 
 template <typename T>
-T box_muller_single(T u0, T u1)
+CudaFn T box_muller_single(T u0, T u1)
 {
-    constexpr T TwoPi = 2.0 * M_PI;
-    T prefactor = std::sqrt(T(-2.0) * std::log(u0));
+    constexpr T TwoPi = fpl(2.0) * M_PI;
+    T prefactor = std::sqrt(T(fpl(-2.0)) * std::log(u0));
     T c = std::cos(TwoPi * u1);
 
     return prefactor * c;

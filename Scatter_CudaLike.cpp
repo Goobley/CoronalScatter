@@ -275,152 +275,153 @@ void free_particles(SimState* state)
     free(state->randStates);
 }
 
-void advance_dtsave(SimParams p, SimState* state)
+void advance_dtsave(SimParams p, SimState* state, int idx)
 {
     JasUnpack((*state), Nparticles, r, rx, ry, rz);
     JasUnpack((*state), kc, kx, ky, kz);
     JasUnpack((*state), omega, nu_s);
     namespace C = Constants;
     fp_t time0 = state->time;
+    fp_t particle_time = state->time;
     fp_t dt = p.dtSave;
 
+    if (idx >= Nparticles)
+    {
+        return;
+    }
+
+    if (!state->active[idx])
+    {
+        return;
+    }
+
     int iters = 0;
-    while (state->time - time0 < dt)
+    while (particle_time - time0 < dt)
     {
         fp_t dt_step = p.dt0;
         if (std::abs(time0 + dt - state->time) < 1e-6)
             break;
         // NOTE(cmo): Compute state vars and timestep
-        for (int i = 0; i < Nparticles; ++i)
-        {
-            if (!state->active[i])
-                continue;
 
-            r[i] = std::sqrt(square(rx[i]) + square(ry[i]) + square(rz[i]));
-            kc[i] = std::sqrt(square(kx[i]) + square(ky[i]) + square(kz[i]));
-            omega[i] = std::sqrt(square(omega_pe(r[i])) + square(kc[i]));
+        r[idx] = std::sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
+        kc[idx] = std::sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        omega[idx] = std::sqrt(square(omega_pe(r[idx])) + square(kc[idx]));
 
-            nu_s[i] = nu_scat(r[i], omega[i], p.eps);
-            nu_s[i] = min(nu_s[i], p.nu_s0);
+        nu_s[idx] = nu_scat(r[idx], omega[idx], p.eps);
+        nu_s[idx] = min(nu_s[idx], p.nu_s0);
 
-            fp_t dt_ref = std::abs(kc[i] / (domega_dr(r[i]) * C::c_r) / 20.0);
-            fp_t dt_dr = r[i] / (C::c_r / p.omega0 * kc[i]) / 20.0;
-            dt_step = min(dt_step, fp_t(0.1 / nu_s[i]));
-            dt_step = min(dt_step, dt_ref);
-            dt_step = min(dt_step, dt_dr);
-        }
-        if (state->time + dt_step > time0 + dt)
-            dt_step = time0 + dt - state->time;
+        fp_t dt_ref = std::abs(kc[idx] / (domega_dr(r[idx]) * C::c_r) / 20.0);
+        fp_t dt_dr = r[idx] / (C::c_r / p.omega0 * kc[idx]) / 20.0;
+        dt_step = min(dt_step, fp_t(0.1 / nu_s[idx]));
+        dt_step = min(dt_step, dt_ref);
+        dt_step = min(dt_step, dt_dr);
+
+        if (particle_time + dt_step > time0 + dt)
+            dt_step = time0 + dt - particle_time;
 
         fp_t sqrt_dt = std::sqrt(dt_step);
-        for (int i = 0; i < Nparticles; ++i)
-        {
-            if (!state->active[i])
-                continue;
 
-            fp_t drx_dt = C::c_r / omega[i] * kx[i];
-            fp_t dry_dt = C::c_r / omega[i] * ky[i];
-            fp_t drz_dt = C::c_r / omega[i] * kz[i];
+        fp_t drx_dt = C::c_r / omega[idx] * kx[idx];
+        fp_t dry_dt = C::c_r / omega[idx] * ky[idx];
+        fp_t drz_dt = C::c_r / omega[idx] * kz[idx];
 
-            auto res0 = draw_2_n(&state->randStates[i]);
-            auto res1 = draw_2_n(&state->randStates[i]);
-            fp_t wx = res0.z0 * sqrt_dt;
-            fp_t wy = res0.z1 * sqrt_dt;
-            fp_t wz = res1.z0 * sqrt_dt;
+        auto res0 = draw_2_n(&state->randStates[idx]);
+        auto res1 = draw_2_n(&state->randStates[idx]);
+        fp_t wx = res0.z0 * sqrt_dt;
+        fp_t wy = res0.z1 * sqrt_dt;
+        fp_t wz = res1.z0 * sqrt_dt;
 
-            // rotate to r-aligned
-            fp_t phi = std::atan2(ry[i], rx[i]);
-            fp_t sintheta = std::sqrt(1.0 - square(rz[i]) / square(r[i]));
-            fp_t costheta = rz[i] / r[i];
-            fp_t sinphi = std::sin(phi);
-            fp_t cosphi = std::cos(phi);
+        // rotate to r-aligned
+        fp_t phi = std::atan2(ry[idx], rx[idx]);
+        fp_t sintheta = std::sqrt(1.0 - square(rz[idx]) / square(r[idx]));
+        fp_t costheta = rz[idx] / r[idx];
+        fp_t sinphi = std::sin(phi);
+        fp_t cosphi = std::cos(phi);
 
-            fp_t kc_old = kc[i];
+        fp_t kc_old = kc[idx];
 
-            fp_t kc_x = - kx[i] * sinphi + ky[i] * cosphi;
-            fp_t kc_y = - kx[i] * costheta * cosphi
-                        - ky[i] * costheta * sinphi
-                        + kz[i] * sintheta;
-            fp_t kc_z =   kx[i] * sintheta * cosphi
-                        + ky[i] * sintheta * sinphi
-                        + kz[i] * costheta;
+        fp_t kc_x = - kx[idx] * sinphi + ky[idx] * cosphi;
+        fp_t kc_y = - kx[idx] * costheta * cosphi
+                    - ky[idx] * costheta * sinphi
+                    + kz[idx] * sintheta;
+        fp_t kc_z =   kx[idx] * sintheta * cosphi
+                    + ky[idx] * sintheta * sinphi
+                    + kz[idx] * costheta;
 
-            // scatter
-            fp_t kw = wx*kc_x + wy*kc_y + wz*kc_z*p.aniso;
-            fp_t Akc = std::sqrt(square(kc_x) + square(kc_y) + square(kc_z) * square(p.aniso));
-            fp_t z_asym = p.asym;
-            if (kc_z <= 0.0)
-                z_asym = (2.0 - p.asym);
-            z_asym *= square(kc[i] / Akc);
+        // scatter
+        fp_t kw = wx*kc_x + wy*kc_y + wz*kc_z*p.aniso;
+        fp_t Akc = std::sqrt(square(kc_x) + square(kc_y) + square(kc_z) * square(p.aniso));
+        fp_t z_asym = p.asym;
+        if (kc_z <= 0.0)
+            z_asym = (2.0 - p.asym);
+        z_asym *= square(kc[idx] / Akc);
 
-            fp_t aniso2 = square(p.aniso);
-            fp_t aniso4 = square(aniso2);
-            fp_t Akc2 = square(Akc);
-            fp_t Akc3 = cube(Akc);
-            fp_t Aperp = nu_s[i] * z_asym * kc[i] / Akc3
-                         * (- (1.0 + aniso2) * Akc2
-                            + 3.0 * aniso2 * (aniso2 - 1.0) * square(kc_z))
-                         * p.aniso;
-            fp_t Apara = nu_s[i] * z_asym * kc[i] / Akc3
-                         * ((-3.0 * aniso4 + aniso2) * Akc2
-                            + 3.0 * aniso4 * (aniso2 - 1.0) * square(kc_z))
-                         * p.aniso;
+        fp_t aniso2 = square(p.aniso);
+        fp_t aniso4 = square(aniso2);
+        fp_t Akc2 = square(Akc);
+        fp_t Akc3 = cube(Akc);
+        fp_t Aperp = nu_s[idx] * z_asym * kc[idx] / Akc3
+                        * (- (1.0 + aniso2) * Akc2
+                        + 3.0 * aniso2 * (aniso2 - 1.0) * square(kc_z))
+                        * p.aniso;
+        fp_t Apara = nu_s[idx] * z_asym * kc[idx] / Akc3
+                        * ((-3.0 * aniso4 + aniso2) * Akc2
+                        + 3.0 * aniso4 * (aniso2 - 1.0) * square(kc_z))
+                        * p.aniso;
 
-            fp_t g0 = std::sqrt(nu_s[i] * square(kc[i]));
-            fp_t Ag0 = g0 * std::sqrt(z_asym * p.aniso);
+        fp_t g0 = std::sqrt(nu_s[idx] * square(kc[idx]));
+        fp_t Ag0 = g0 * std::sqrt(z_asym * p.aniso);
 
-            kc_x +=  Aperp * kc_x * dt_step
-                   + Ag0 * (wx - kc_x * kw / Akc2);
-            kc_y +=  Aperp * kc_y * dt_step
-                   + Ag0 * (wy - kc_y * kw / Akc2);
-            kc_z +=  Apara * kc_z * dt_step
-                   + Ag0 * (wz - kc_z * kw * p.aniso / Akc2) * p.aniso;
+        kc_x +=  Aperp * kc_x * dt_step
+                + Ag0 * (wx - kc_x * kw / Akc2);
+        kc_y +=  Aperp * kc_y * dt_step
+                + Ag0 * (wy - kc_y * kw / Akc2);
+        kc_z +=  Apara * kc_z * dt_step
+                + Ag0 * (wz - kc_z * kw * p.aniso / Akc2) * p.aniso;
 
-            // rotate back to cartesian
+        // rotate back to cartesian
 
-            kx[i] = -kc_x*sinphi - kc_y*costheta*cosphi + kc_z*sintheta*cosphi;
-            ky[i] =  kc_x*cosphi - kc_y*costheta*sinphi + kc_z*sintheta*sinphi;
-            kz[i] =  kc_y*sintheta + kc_z*costheta;
+        kx[idx] = -kc_x*sinphi - kc_y*costheta*cosphi + kc_z*sintheta*cosphi;
+        ky[idx] =  kc_x*cosphi - kc_y*costheta*sinphi + kc_z*sintheta*sinphi;
+        kz[idx] =  kc_y*sintheta + kc_z*costheta;
 
-            fp_t kc_norm = std::sqrt(square(kx[i]) + square(ky[i]) + square(kz[i]));
-            kx[i] *= kc[i] / kc_norm;
-            ky[i] *= kc[i] / kc_norm;
-            kz[i] *= kc[i] / kc_norm;
+        fp_t kc_norm = std::sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        kx[idx] *= kc[idx] / kc_norm;
+        ky[idx] *= kc[idx] / kc_norm;
+        kz[idx] *= kc[idx] / kc_norm;
 
-            // do time integration
-            // fp_t dk_dt = (omega_pe(r[i]) / omega[i]) * domega_dr(r[i]) * C::c_r;
-            fp_t om[2];
-            omega_pe_dr(r[i], om);
-            fp_t dk_dt = (om[0] / omega[i]) * om[1] * C::c_r;
-            kx[i] -= dk_dt * (rx[i] / r[i]) * dt_step;
-            ky[i] -= dk_dt * (ry[i] / r[i]) * dt_step;
-            kz[i] -= dk_dt * (rz[i] / r[i]) * dt_step;
+        // do time integration
+        // fp_t dk_dt = (omega_pe(r[i]) / omega[i]) * domega_dr(r[i]) * C::c_r;
+        fp_t om[2];
+        omega_pe_dr(r[idx], om);
+        fp_t dk_dt = (om[0] / omega[idx]) * om[1] * C::c_r;
+        kx[idx] -= dk_dt * (rx[idx] / r[idx]) * dt_step;
+        ky[idx] -= dk_dt * (ry[idx] / r[idx]) * dt_step;
+        kz[idx] -= dk_dt * (rz[idx] / r[idx]) * dt_step;
 
-            rx[i] += drx_dt * dt_step;
-            ry[i] += dry_dt * dt_step;
-            rz[i] += drz_dt * dt_step;
+        rx[idx] += drx_dt * dt_step;
+        ry[idx] += dry_dt * dt_step;
+        rz[idx] += drz_dt * dt_step;
 
-            r[i] = std::sqrt(square(rx[i]) + square(ry[i]) + square(rz[i]));
-            kc[i] = std::sqrt(square(kx[i]) + square(ky[i]) + square(kz[i]));
+        r[idx] = std::sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
+        kc[idx] = std::sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
 
-            // conserve frequency
-            // fp_t kc_new_old = kc_old / kc[i];
-            fp_t kc_new_old = std::sqrt(square(omega[i]) - square(omega_pe(r[i])));
-            kc_new_old /= kc[i];
-            // kc_new_old = 1.0;
-            kx[i] *= kc_new_old;
-            ky[i] *= kc_new_old;
-            kz[i] *= kc_new_old;
+        // conserve frequency
+        // fp_t kc_new_old = kc_old / kc[i];
+        fp_t kc_new_old = std::sqrt(square(omega[idx]) - square(omega_pe(r[idx])));
+        kc_new_old /= kc[idx];
+        // kc_new_old = 1.0;
+        kx[idx] *= kc_new_old;
+        ky[idx] *= kc_new_old;
+        kz[idx] *= kc_new_old;
 
 
-            kc[i] = std::sqrt(square(kx[i]) + square(ky[i]) + square(kz[i]));
-        }
-        state->time += dt_step;
+        kc[idx] = std::sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        particle_time += dt_step;
 
-        for (int i = 0; i < Nparticles; ++i)
-        {
-            if (state->active[i] && (r[i] > p.Rstop))
-                state->active[i] = 0;
+        if (r[idx] > p.Rstop) {
+            state->active[idx] = 0;
+            break;
         }
         iters += 1;
     }
@@ -476,7 +477,7 @@ void write_positions(SimState* s)
 // TODO(cmo): Optical depth
 int main(void)
 {
-    constexpr int Nparticles = 1024;
+    constexpr int Nparticles = 1024*128;
     SimParams params = default_params();
     SimState state = init_particles(Nparticles, &params);
 
@@ -495,7 +496,9 @@ int main(void)
 #endif
     while (count >= Nparticles / 200)
     {
-        advance_dtsave(params, &state);
+        for (int i = 0; i < Nparticles; ++i) {
+            advance_dtsave(params, &state, i);
+        }
 #ifdef WRITE_OUT
         write_positions(&state);
 #endif
