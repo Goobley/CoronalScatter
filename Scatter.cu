@@ -5,10 +5,13 @@
 #include "Random.hpp"
 #include "DensityModelCuda.h"
 #include "ScatteringModel.h"
-#include "cnpy.h"
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include "helper_cuda.h"
+
+#ifdef WRITE_OUT
+#include "cnpy.h"
+#endif
 
 template <typename RandState>
 struct BaseSimState
@@ -321,6 +324,7 @@ __global__ void advance_dtsave_cuda(SimParams p, SimState* state) {
         if (abs(time0 + dt - particle_time) < fpl(1e-6))
             break;
         // NOTE(cmo): Compute state vars and timestep
+        // TODO(cmo): Use LUTs for omega_pe, density, and domega_dr
         r[idx] = sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
         kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
         omega[idx] = sqrt(square(omega_pe(r[idx])) + square(kc[idx]));
@@ -454,6 +458,7 @@ int count_active(SimState* s)
     return count;
 }
 
+#ifdef WRITE_OUT
 void write_positions(SimState* s)
 {
 #if 0
@@ -489,10 +494,12 @@ void write_positions(SimState* s)
     free(buf);
 #endif
 }
+#endif
 
 
 // TODO(cmo): Check if we wrap over random state
 // TODO(cmo): Optical depth
+// TODO(cmo): Minimise writebacks to the global arrays in the cuda kernel.
 int main(int argc, const char* argv[])
 {
     findCudaDevice(argc, argv);
@@ -566,4 +573,6 @@ int main(int argc, const char* argv[])
 
 // cl /Ox /D "NDEGUG" /std:c++17 -nologo /Z7 -WL /MD /GL /arch:AVX2 /FC /EHsc Scatter.cpp /link /LTCG /OUT:scatter.exe /DEBUG:FULL
 
+#ifdef WRITE_OUT
 #include "cnpy.cpp" // NOTE(cmo): Need to link with `-lz` for zlib.
+#endif

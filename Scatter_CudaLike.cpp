@@ -156,8 +156,8 @@ SimRadii compute_sim_radii(SimParams p, SimState* s)
         }
     }
 
-    r_stop = max(r_stop, max(r_scat, 2.0 * p.Rinit));
-    r_stop = min(r_stop, 215.0);
+    r_stop = max(r_stop, max(r_scat, fpl(2.0) * p.Rinit));
+    r_stop = min(r_stop, fpl(215.0));
 
     free(rint);
     free(tau_scat);
@@ -310,6 +310,12 @@ void advance_dtsave(SimParams p, SimState* state, int idx)
         nu_s[idx] = nu_scat(r[idx], omega[idx], p.eps);
         nu_s[idx] = min(nu_s[idx], p.nu_s0);
 
+        printf("-----\n");
+        // NOTE(cmo): This nu_s term seems to be infinite in fp32, right from the start.
+        // The omega[idx] term is unreasonably large for fp32. May be loss of precision even with the nu_scat fn in fp64.
+        printf("%f\n", nu_s[idx]);
+        printf("%f, %f, %f\n", r[idx], omega[idx], p.eps);
+        printf("\n\n");
         fp_t dt_ref = std::abs(kc[idx] / (domega_dr(r[idx]) * C::c_r) / 20.0);
         fp_t dt_dr = r[idx] / (C::c_r / p.omega0 * kc[idx]) / 20.0;
         dt_step = min(dt_step, fp_t(0.1 / nu_s[idx]));
@@ -477,7 +483,7 @@ void write_positions(SimState* s)
 // TODO(cmo): Optical depth
 int main(void)
 {
-    constexpr int Nparticles = 1024*128;
+    constexpr int Nparticles = 1;
     SimParams params = default_params();
     SimState state = init_particles(Nparticles, &params);
 
@@ -494,7 +500,8 @@ int main(void)
 #ifdef WRITE_OUT
     write_positions(&state);
 #endif
-    while (count >= Nparticles / 200)
+    int cycles = 0;
+    while (count >= Nparticles / 200 && cycles < 1)
     {
         for (int i = 0; i < Nparticles; ++i) {
             advance_dtsave(params, &state, i);
@@ -530,6 +537,7 @@ int main(void)
         printf("%f, %f, %e\n", mean_kx, mean_ky, mean_kz);
         printf("%f\n", mean_nus);
         // count = 0;
+        cycles += 1;
     }
 
     free_particles(&state);
