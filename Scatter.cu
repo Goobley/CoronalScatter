@@ -2,9 +2,11 @@
 #include <cstdio>
 #include <cstring>
 #include "JasPP.hpp"
+#include "State.hpp"
 #include "Random.hpp"
 #include "DensityModelCuda.h"
 #include "ScatteringModel.h"
+#include "SimpleLut.hpp"
 
 #ifdef __CUDACC__
 #include <cuda_runtime.h>
@@ -16,33 +18,7 @@
 #include "cnpy.h"
 #endif
 
-template <typename RandState>
-struct BaseSimState
-{
-    int64_t Nparticles;
-    fp_t time;
-    int32_t* active;
-
-    fp_t* r;
-    fp_t* rx;
-    fp_t* ry;
-    fp_t* rz;
-
-    fp_t* kc;
-    fp_t* kx;
-    fp_t* ky;
-    fp_t* kz;
-
-    fp_t* omega;
-    fp_t* nu_s;
-
-    RandState* randStates;
-};
-
-using SimState = BaseSimState<Xoroshiro256StarStar::Xoro256State>;
-namespace Rand = Xoroshiro256StarStar;
-using RandomTransforms::BoxMullerResult;
-typedef Rand::Xoro256State RandState;
+constexpr int32_t LutSize = 1024 * 1024;
 
 fp_t draw_u(RandState* s)
 {
@@ -99,12 +75,6 @@ SimParams default_params()
     result.nu_s0 = 0.0;
     result.seed = 110081;
     return result;
-}
-
-CudaFn inline void omega_pe_dr(fp_t r, fp_t* result)
-{
-    result[0] = omega_pe(r);
-    result[1] = domega_dr(r);
 }
 
 SimRadii compute_sim_radii(SimParams p, SimState* s)
@@ -178,6 +148,22 @@ SimRadii compute_sim_radii(SimParams p, SimState* s)
     return result;
 }
 
+void init_luts(SimParams p, SimState* s)
+{
+    f64 r_min = 0.0;
+    f64 r_max = p.Rstop * 1.1;
+
+    printf("\n------\nComputing LUTs\n------\n");
+    s->density_r.init(r_min, r_max, LutSize, density_r);
+    printf("density done\n");
+    s->omega_pe.init(r_min, r_max, LutSize, omega_pe);
+    printf("omega_pe done\n");
+    s->domega_dr.init(r_min, r_max, LutSize, domega_dr);
+    printf("domega_dr done\n");
+    printf("\n------\nLUTs Done\n------\n");
+}
+
+// TODO(cmo): update malloc for non __CUDACC__ case
 SimState* init_particles(int Nparticles, SimParams* p)
 {
     SimState* true_result;
@@ -276,6 +262,8 @@ SimState* init_particles(int Nparticles, SimParams* p)
     p->dtSave = 2e7 / omega;
     p->dtSave = (p->Rstop - p->Rinit) / C::c_r / 10.0;
 
+    init_luts(*p, &result);
+
     return true_result;
 }
 
@@ -331,12 +319,14 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
         // TODO(cmo): Use LUTs for omega_pe, density, and domega_dr
         r[idx] = sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
         kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
-        omega[idx] = sqrt(square(omega_pe(r[idx])) + square(kc[idx]));
+        // omega[idx] = sqrt(square(omega_pe(r[idx])) + square(kc[idx]));
+        fp_t omega_pe_r = state->omega_pe(r[idx]);
+        omega[idx] = sqrt(square(omega_pe_r) + square(kc[idx]));
 
-        nu_s[idx] = nu_scat(r[idx], omega[idx], p.eps);
+        nu_s[idx] = nu_scat(r[idx], omega[idx], p.eps, state);
         nu_s[idx] = min(nu_s[idx], p.nu_s0);
 
-        fp_t dt_ref = abs(kc[idx] / (domega_dr(r[idx]) * C::c_r) / fpl(20.0));
+        fp_t dt_ref = abs(kc[idx] / (state->domega_dr(r[idx]) * C::c_r) / fpl(20.0));
         fp_t dt_dr = r[idx] / (C::c_r / p.omega0 * kc[idx]) / fpl(20.0);
         dt_step = min(dt_step, fp_t(fpl(0.1) / nu_s[idx]));
         dt_step = min(dt_step, dt_ref);
@@ -418,9 +408,7 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
 
         // do time integration
         // fp_t dk_dt = (omega_pe(r[i]) / omega[i]) * domega_dr(r[i]) * C::c_r;
-        fp_t om[2];
-        omega_pe_dr(r[idx], om);
-        fp_t dk_dt = (om[0] / omega[idx]) * om[1] * C::c_r;
+        fp_t dk_dt = (omega_pe_r / omega[idx]) * state->domega_dr(r[idx]) * C::c_r;
         kx[idx] -= dk_dt * (rx[idx] / r[idx]) * dt_step;
         ky[idx] -= dk_dt * (ry[idx] / r[idx]) * dt_step;
         kz[idx] -= dk_dt * (rz[idx] / r[idx]) * dt_step;
@@ -431,10 +419,11 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
 
         r[idx] = sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
         kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        omega_pe_r = state->omega_pe(r[idx]);
 
         // conserve frequency
         // fp_t kc_new_old = kc_old / kc[i];
-        fp_t kc_new_old = sqrt(square(omega[idx]) - square(omega_pe(r[idx])));
+        fp_t kc_new_old = sqrt(square(omega[idx]) - square(omega_pe_r));
         kc_new_old /= kc[idx];
         // kc_new_old = 1.0;
         kx[idx] *= kc_new_old;
@@ -520,7 +509,7 @@ void write_positions(SimState* s)
 int main(int argc, const char* argv[])
 {
     findCudaDevice(argc, argv);
-    constexpr int Nparticles = 1024 * 128;
+    constexpr int Nparticles = 1024;
     SimParams params = default_params();
     SimState* state = init_particles(Nparticles, &params);
 
