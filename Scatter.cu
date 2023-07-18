@@ -163,29 +163,50 @@ void init_luts(SimParams p, SimState* s)
     printf("\n------\nLUTs Done\n------\n");
 }
 
+template <typename T>
+inline void cmo_alloc(T** ptr, size_t size)
+{
+#ifdef __CUDACC__
+    checkCudaErrors(cudaMallocManaged(ptr, size));
+#else
+    *ptr = (T*)malloc(size);
+#endif
+}
+
+template <typename T>
+inline void cmo_free(T* ptr)
+{
+#ifdef __CUDACC__
+    cudaFree(ptr);
+#else
+    free(ptr);
+#endif
+
+}
+
 // TODO(cmo): update malloc for non __CUDACC__ case
 SimState* init_particles(int Nparticles, SimParams* p)
 {
     SimState* true_result;
-    checkCudaErrors(cudaMallocManaged(&true_result, sizeof(SimState)));
+    cmo_alloc(&true_result, sizeof(SimState));
     SimState& result(*true_result);
     result.Nparticles = Nparticles;
     result.time = 0.0;
-    checkCudaErrors(cudaMallocManaged(&result.active, Nparticles * sizeof(int32_t)));
+    cmo_alloc(&result.active, Nparticles * sizeof(int32_t));
     for (int i = 0; i < Nparticles; ++i)
         result.active[i] = 1;
 
     const int allocSize = Nparticles * sizeof(fp_t);
-    checkCudaErrors(cudaMallocManaged(&result.r, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.rx, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.ry, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.rz, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.kc, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.kx, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.ky, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.kz, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.omega, allocSize));
-    checkCudaErrors(cudaMallocManaged(&result.nu_s, allocSize));
+    cmo_alloc(&result.r, allocSize);
+    cmo_alloc(&result.rx, allocSize);
+    cmo_alloc(&result.ry, allocSize);
+    cmo_alloc(&result.rz, allocSize);
+    cmo_alloc(&result.kc, allocSize);
+    cmo_alloc(&result.kx, allocSize);
+    cmo_alloc(&result.ky, allocSize);
+    cmo_alloc(&result.kz, allocSize);
+    cmo_alloc(&result.omega, allocSize);
+    cmo_alloc(&result.nu_s, allocSize);
     memset(result.r, 0, allocSize);
     memset(result.rx, 0, allocSize);
     memset(result.ry, 0, allocSize);
@@ -197,7 +218,7 @@ SimState* init_particles(int Nparticles, SimParams* p)
     memset(result.omega, 0, allocSize);
     memset(result.nu_s, 0, allocSize);
 
-    checkCudaErrors(cudaMallocManaged(&result.randStates, Nparticles * sizeof(RandState)));
+    cmo_alloc(&result.randStates, Nparticles * sizeof(RandState));
 
     // NOTE(cmo): Seed states
     result.randStates[0] = Rand::seed_state(p->seed);
@@ -270,19 +291,19 @@ SimState* init_particles(int Nparticles, SimParams* p)
 
 void free_particles(SimState* state)
 {
-    cudaFree(state->active);
-    cudaFree(state->r);
-    cudaFree(state->rx);
-    cudaFree(state->ry);
-    cudaFree(state->rz);
-    cudaFree(state->kc);
-    cudaFree(state->kx);
-    cudaFree(state->ky);
-    cudaFree(state->kz);
-    cudaFree(state->omega);
-    cudaFree(state->nu_s);
-    cudaFree(state->randStates);
-    cudaFree(state);
+    cmo_free(state->active);
+    cmo_free(state->r);
+    cmo_free(state->rx);
+    cmo_free(state->ry);
+    cmo_free(state->rz);
+    cmo_free(state->kc);
+    cmo_free(state->kx);
+    cmo_free(state->ky);
+    cmo_free(state->kz);
+    cmo_free(state->omega);
+    cmo_free(state->nu_s);
+    cmo_free(state->randStates);
+    cmo_free(state);
 }
 
 CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
@@ -451,10 +472,12 @@ void advance_dtsave_cpu(SimParams p, SimState* state)
     }
 }
 
+#ifdef __CUDACC__
 __global__ void advance_dtsave_cuda(SimParams p, SimState* state) {
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     advance_dtsave_kernel(p, state, idx);
 }
+#endif
 
 int count_active(SimState* s)
 {
@@ -508,7 +531,6 @@ void write_positions(SimState* s)
 // TODO(cmo): Minimise writebacks to the global arrays in the cuda kernel.
 int main(int argc, const char* argv[])
 {
-    findCudaDevice(argc, argv);
     constexpr int Nparticles = 1024;
     SimParams params = default_params();
     SimState* state = init_particles(Nparticles, &params);
@@ -524,6 +546,7 @@ int main(int argc, const char* argv[])
     printf("Time: %f s, Starting particles: %d\n", state->time, count);
 
 #ifdef __CUDACC__
+    findCudaDevice(argc, argv);
     // https://developer.nvidia.com/blog/cuda-pro-tip-occupancy-api-simplifies-launch-configuration/
     int blockSize;
     int minGridSize;

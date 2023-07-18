@@ -78,7 +78,7 @@ struct UniformLut
 #if __CUDACC__
         checkCudaErrors(cudaMallocManaged(&fp, Npoints * sizeof(Tstore)));
 #else
-        fp = calloc(Npoints, sizeof(Tstore)));
+        fp = (Tstore*)calloc(Npoints, sizeof(Tstore));
 #endif
     }
 
