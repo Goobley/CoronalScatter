@@ -91,7 +91,7 @@ struct UniformLut
         }
 
         int32_t idx_m = (x - x_min) / step;
-        int32_t idx_p = (x - x_min) / step;
+        int32_t idx_p = idx_m + 1;
         Tstore xm = x_min + idx_m * step;
         Tstore xp = xm + step;
         Tstore alpha = (x - xm) / (xp - xm);
