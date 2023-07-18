@@ -311,9 +311,10 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
     // NOTE(cmo): This kernel doesn't advance state->time (as it is shared),
     // but does move all particles by p.dtSave (or until their exit).
     // Once out of this kernel, increment state->time in host code.
-    JasUnpack((*state), Nparticles, r, rx, ry, rz);
-    JasUnpack((*state), kc, kx, ky, kz);
-    JasUnpack((*state), omega, nu_s);
+    // JasUnpack((*state), Nparticles, r, rx, ry, rz);
+    // JasUnpack((*state), kc, kx, ky, kz);
+    // JasUnpack((*state), omega, nu_s);
+    JasUnpack((*state), Nparticles);
     namespace C = Constants;
     fp_t time0 = state->time;
     fp_t particle_time = state->time;
@@ -330,6 +331,20 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
         return;
     }
 
+    // NOTE(cmo): Pull everything out to local memory (reduce number of global
+    // accesses in CUDA).
+    fp_t r = state->r[idx];
+    fp_t rx = state->rx[idx];
+    fp_t ry = state->ry[idx];
+    fp_t rz = state->rz[idx];
+    fp_t kc = state->kc[idx];
+    fp_t kx = state->kx[idx];
+    fp_t ky = state->ky[idx];
+    fp_t kz = state->kz[idx];
+    fp_t omega = state->omega[idx];
+    fp_t nu_s = state->nu_s[idx];
+    RandState randState = state->randStates[idx];
+
     int iters = 0;
     while (particle_time - time0 < dt)
     {
@@ -338,18 +353,18 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
             break;
         // NOTE(cmo): Compute state vars and timestep
         // TODO(cmo): Use LUTs for omega_pe, density, and domega_dr
-        r[idx] = sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
-        kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        r = sqrt(square(rx) + square(ry) + square(rz));
+        kc = sqrt(square(kx) + square(ky) + square(kz));
         // omega[idx] = sqrt(square(omega_pe(r[idx])) + square(kc[idx]));
-        fp_t omega_pe_r = state->omega_pe(r[idx]);
-        omega[idx] = sqrt(square(omega_pe_r) + square(kc[idx]));
+        fp_t omega_pe_r = state->omega_pe(r);
+        omega = sqrt(square(omega_pe_r) + square(kc));
 
-        nu_s[idx] = nu_scat(r[idx], omega[idx], p.eps, state);
-        nu_s[idx] = min(nu_s[idx], p.nu_s0);
+        nu_s = nu_scat(r, omega, p.eps, state);
+        nu_s = min(nu_s, p.nu_s0);
 
-        fp_t dt_ref = abs(kc[idx] / (state->domega_dr(r[idx]) * C::c_r) / fpl(20.0));
-        fp_t dt_dr = r[idx] / (C::c_r / p.omega0 * kc[idx]) / fpl(20.0);
-        dt_step = min(dt_step, fp_t(fpl(0.1) / nu_s[idx]));
+        fp_t dt_ref = abs(kc / (state->domega_dr(r) * C::c_r) / fpl(20.0));
+        fp_t dt_dr = r / (C::c_r / p.omega0 * kc) / fpl(20.0);
+        dt_step = min(dt_step, fp_t(fpl(0.1) / nu_s));
         dt_step = min(dt_step, dt_ref);
         dt_step = min(dt_step, dt_dr);
 
@@ -358,32 +373,32 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
 
         fp_t sqrt_dt = sqrt(dt_step);
 
-        fp_t drx_dt = C::c_r / omega[idx] * kx[idx];
-        fp_t dry_dt = C::c_r / omega[idx] * ky[idx];
-        fp_t drz_dt = C::c_r / omega[idx] * kz[idx];
+        fp_t drx_dt = C::c_r / omega * kx;
+        fp_t dry_dt = C::c_r / omega * ky;
+        fp_t drz_dt = C::c_r / omega * kz;
 
-        auto res0 = draw_2_n(&state->randStates[idx]);
-        auto res1 = draw_2_n(&state->randStates[idx]);
+        auto res0 = draw_2_n(&randState);
+        auto res1 = draw_2_n(&randState);
         fp_t wx = res0.z0 * sqrt_dt;
         fp_t wy = res0.z1 * sqrt_dt;
         fp_t wz = res1.z0 * sqrt_dt;
 
         // rotate to r-aligned
-        fp_t phi = atan2(ry[idx], rx[idx]);
-        fp_t sintheta = sqrt(fpl(1.0) - square(rz[idx]) / square(r[idx]));
-        fp_t costheta = rz[idx] / r[idx];
+        fp_t phi = atan2(ry, rx);
+        fp_t sintheta = sqrt(fpl(1.0) - square(rz) / square(r));
+        fp_t costheta = rz / r;
         fp_t sinphi = sin(phi);
         fp_t cosphi = cos(phi);
 
-        fp_t kc_old = kc[idx];
+        fp_t kc_old = kc;
 
-        fp_t kc_x = - kx[idx] * sinphi + ky[idx] * cosphi;
-        fp_t kc_y = - kx[idx] * costheta * cosphi
-                    - ky[idx] * costheta * sinphi
-                    + kz[idx] * sintheta;
-        fp_t kc_z =   kx[idx] * sintheta * cosphi
-                    + ky[idx] * sintheta * sinphi
-                    + kz[idx] * costheta;
+        fp_t kc_x = - kx * sinphi + ky * cosphi;
+        fp_t kc_y = - kx * costheta * cosphi
+                    - ky * costheta * sinphi
+                    + kz * sintheta;
+        fp_t kc_z =   kx * sintheta * cosphi
+                    + ky * sintheta * sinphi
+                    + kz * costheta;
 
         // scatter
         fp_t kw = wx*kc_x + wy*kc_y + wz*kc_z*p.aniso;
@@ -391,22 +406,22 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
         fp_t z_asym = p.asym;
         if (kc_z <= fpl(0.0))
             z_asym = (fpl(2.0) - p.asym);
-        z_asym *= square(kc[idx] / Akc);
+        z_asym *= square(kc / Akc);
 
         fp_t aniso2 = square(p.aniso);
         fp_t aniso4 = square(aniso2);
         fp_t Akc2 = square(Akc);
         fp_t Akc3 = cube(Akc);
-        fp_t Aperp = nu_s[idx] * z_asym * kc[idx] / Akc3
+        fp_t Aperp = nu_s * z_asym * kc / Akc3
                         * (- (fpl(1.0) + aniso2) * Akc2
                         + fpl(3.0) * aniso2 * (aniso2 - fpl(1.0)) * square(kc_z))
                         * p.aniso;
-        fp_t Apara = nu_s[idx] * z_asym * kc[idx] / Akc3
+        fp_t Apara = nu_s * z_asym * kc / Akc3
                         * ((fpl(-3.0) * aniso4 + aniso2) * Akc2
                         + fpl(3.0) * aniso4 * (aniso2 - fpl(1.0)) * square(kc_z))
                         * p.aniso;
 
-        fp_t g0 = sqrt(nu_s[idx] * square(kc[idx]));
+        fp_t g0 = sqrt(nu_s * square(kc));
         fp_t Ag0 = g0 * sqrt(z_asym * p.aniso);
 
         kc_x +=  Aperp * kc_x * dt_step
@@ -418,50 +433,63 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
 
         // rotate back to cartesian
 
-        kx[idx] = -kc_x*sinphi - kc_y*costheta*cosphi + kc_z*sintheta*cosphi;
-        ky[idx] =  kc_x*cosphi - kc_y*costheta*sinphi + kc_z*sintheta*sinphi;
-        kz[idx] =  kc_y*sintheta + kc_z*costheta;
+        kx = -kc_x*sinphi - kc_y*costheta*cosphi + kc_z*sintheta*cosphi;
+        ky =  kc_x*cosphi - kc_y*costheta*sinphi + kc_z*sintheta*sinphi;
+        kz =  kc_y*sintheta + kc_z*costheta;
 
-        fp_t kc_norm = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
-        kx[idx] *= kc[idx] / kc_norm;
-        ky[idx] *= kc[idx] / kc_norm;
-        kz[idx] *= kc[idx] / kc_norm;
+        fp_t kc_norm = sqrt(square(kx) + square(ky) + square(kz));
+        kx *= kc / kc_norm;
+        ky *= kc / kc_norm;
+        kz *= kc / kc_norm;
 
         // do time integration
         // fp_t dk_dt = (omega_pe(r[i]) / omega[i]) * domega_dr(r[i]) * C::c_r;
-        fp_t dk_dt = (omega_pe_r / omega[idx]) * state->domega_dr(r[idx]) * C::c_r;
-        kx[idx] -= dk_dt * (rx[idx] / r[idx]) * dt_step;
-        ky[idx] -= dk_dt * (ry[idx] / r[idx]) * dt_step;
-        kz[idx] -= dk_dt * (rz[idx] / r[idx]) * dt_step;
+        fp_t dk_dt = (omega_pe_r / omega) * state->domega_dr(r) * C::c_r;
+        kx -= dk_dt * (rx / r) * dt_step;
+        ky -= dk_dt * (ry / r) * dt_step;
+        kz -= dk_dt * (rz / r) * dt_step;
 
-        rx[idx] += drx_dt * dt_step;
-        ry[idx] += dry_dt * dt_step;
-        rz[idx] += drz_dt * dt_step;
+        rx += drx_dt * dt_step;
+        ry += dry_dt * dt_step;
+        rz += drz_dt * dt_step;
 
-        r[idx] = sqrt(square(rx[idx]) + square(ry[idx]) + square(rz[idx]));
-        kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
-        omega_pe_r = state->omega_pe(r[idx]);
+        r = sqrt(square(rx) + square(ry) + square(rz));
+        kc = sqrt(square(kx) + square(ky) + square(kz));
+        omega_pe_r = state->omega_pe(r);
 
         // conserve frequency
         // fp_t kc_new_old = kc_old / kc[i];
-        fp_t kc_new_old = sqrt(square(omega[idx]) - square(omega_pe_r));
-        kc_new_old /= kc[idx];
+        fp_t kc_new_old = sqrt(square(omega) - square(omega_pe_r));
+        kc_new_old /= kc;
         // kc_new_old = 1.0;
-        kx[idx] *= kc_new_old;
-        ky[idx] *= kc_new_old;
-        kz[idx] *= kc_new_old;
+        kx *= kc_new_old;
+        ky *= kc_new_old;
+        kz *= kc_new_old;
 
 
-        kc[idx] = sqrt(square(kx[idx]) + square(ky[idx]) + square(kz[idx]));
+        kc = sqrt(square(kx) + square(ky) + square(kz));
         particle_time += dt_step;
 
         iters += 1;
-        if (r[idx] > p.Rstop)
+        if (r > p.Rstop)
         {
             state->active[idx] = 0;
             break;
         }
     }
+
+    // NOTE(cmo): Assign everything we pulled out of global memory;
+    state->r[idx] = r;
+    state->rx[idx] = rx;
+    state->ry[idx] = ry;
+    state->rz[idx] = rz;
+    state->kc[idx] = kc;
+    state->kx[idx] = kx;
+    state->ky[idx] = ky;
+    state->kz[idx] = kz;
+    state->omega[idx] = omega;
+    state->nu_s[idx] = nu_s;
+    state->randStates[idx] = randState;
 }
 
 void advance_dtsave_cpu(SimParams p, SimState* state)
@@ -531,7 +559,7 @@ void write_positions(SimState* s)
 // TODO(cmo): Minimise writebacks to the global arrays in the cuda kernel.
 int main(int argc, const char* argv[])
 {
-    constexpr int Nparticles = 1024;
+    constexpr int Nparticles = 1024 * 256;
     SimParams params = default_params();
     SimState* state = init_particles(Nparticles, &params);
 
