@@ -135,8 +135,8 @@ SimRadii compute_sim_radii(SimParams p, SimState* s)
         }
     }
 
-    r_stop = max(r_stop, max(r_scat, 2.0 * p.Rinit));
-    r_stop = min(r_stop, 215.0);
+    r_stop = max(r_stop, max(r_scat, fpl(2.0) * p.Rinit));
+    r_stop = min(r_stop, fpl(215.0));
 
     free(rint);
     free(tau_scat);

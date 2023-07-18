@@ -9,6 +9,8 @@ extern "C" {
 
 CudaFn inline fp_t nu_scat_krupar(fp_t r, fp_t omega, fp_t eps, SimState* s=nullptr)
 {
+    // NOTE(cmo): This function breaks in single precision.
+    using fp_t = f64;
     namespace C = Constants;
     const fp_t Third = fpl(1.0) / fpl(3.0);
     const fp_t TwoThird = fpl(2.0) / fpl(3.0);
