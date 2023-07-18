@@ -567,7 +567,7 @@ int main(int argc, const char* argv[])
     fp_t omega2 = omega_pe(2.15);
     fp_t domega = domega_dr(3.0);
     fp_t nu = nu_scat(2.0, 221427600.0, params.eps);
-    printf("omega: %f %f\n", omega1, omega2);
+    printf("omega: %f %f, nu_s: %f\n", omega1, omega2, nu, state);
     // omega: 201297810.663404 103774832.114953
 
     int count = count_active(state);

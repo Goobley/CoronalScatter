@@ -7,13 +7,19 @@
 extern "C" {
 #endif
 
+
 CudaFn inline fp_t nu_scat_krupar(fp_t r, fp_t omega, fp_t eps, SimState* s=nullptr)
 {
+#ifndef OriginalNuScatForm
+#define OriginalNuScatForm 0
+#endif
+#if OriginalNuScatForm
     // NOTE(cmo): This function breaks in single precision.
     using fp_t = f64;
+#endif
     namespace C = Constants;
-    const fp_t Third = fpl(1.0) / fpl(3.0);
-    const fp_t TwoThird = fpl(2.0) / fpl(3.0);
+    constexpr fp_t Third = fpl(1.0) / fpl(3.0);
+    constexpr fp_t TwoThird = fpl(2.0) / fpl(3.0);
     // inner turbulence scale
     fp_t l_i = r * fpl(1e5);
     // outer turbulence scale
@@ -30,9 +36,17 @@ CudaFn inline fp_t nu_scat_krupar(fp_t r, fp_t omega, fp_t eps, SimState* s=null
     }
 
     fp_t w_pe2 = square(w_pe);
+#if OriginalNuScatForm
     fp_t w_pe4 = square(w_pe2);
     fp_t nu_s = C::Pi * square(eps) / (pow(l_i, Third) * pow(l_0, TwoThird));
     nu_s *= w_pe4 * C::c / omega / pow(square(omega) - w_pe2, fpl(1.5));
+#else
+    fp_t diff_term = pow(square(omega) - w_pe2, fpl(1.5));
+    fp_t t_1 = square(cbrt(l_0));
+    fp_t t_2 = cbrt(l_i);
+    fp_t nu_s = square(eps) * C::Pi * w_pe2 / (t_1 * t_2) / diff_term;
+    nu_s *= w_pe2 / omega * C::c;
+#endif
     return nu_s;
 }
 
