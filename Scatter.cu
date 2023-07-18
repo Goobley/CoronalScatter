@@ -5,9 +5,12 @@
 #include "Random.hpp"
 #include "DensityModelCuda.h"
 #include "ScatteringModel.h"
+
+#ifdef __CUDACC__
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include "helper_cuda.h"
+#endif
 
 #ifdef WRITE_OUT
 #include "cnpy.h"
@@ -294,7 +297,8 @@ void free_particles(SimState* state)
     cudaFree(state);
 }
 
-__global__ void advance_dtsave_cuda(SimParams p, SimState* state) {
+CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
+{
     // NOTE(cmo): This kernel doesn't advance state->time (as it is shared),
     // but does move all particles by p.dtSave (or until their exit).
     // Once out of this kernel, increment state->time in host code.
@@ -306,7 +310,7 @@ __global__ void advance_dtsave_cuda(SimParams p, SimState* state) {
     fp_t particle_time = state->time;
     fp_t dt = p.dtSave;
 
-    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    // int idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (idx >= Nparticles)
     {
         return;
@@ -450,6 +454,19 @@ __global__ void advance_dtsave_cuda(SimParams p, SimState* state) {
     }
 }
 
+void advance_dtsave_cpu(SimParams p, SimState* state)
+{
+    for (int idx = 0; idx < state->Nparticles; ++idx)
+    {
+        advance_dtsave_kernel(p, state, idx);
+    }
+}
+
+__global__ void advance_dtsave_cuda(SimParams p, SimState* state) {
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    advance_dtsave_kernel(p, state, idx);
+}
+
 int count_active(SimState* s)
 {
     int count = 0;
@@ -517,6 +534,7 @@ int main(int argc, const char* argv[])
     int count = count_active(state);
     printf("Time: %f s, Starting particles: %d\n", state->time, count);
 
+#ifdef __CUDACC__
     // https://developer.nvidia.com/blog/cuda-pro-tip-occupancy-api-simplifies-launch-configuration/
     int blockSize;
     int minGridSize;
@@ -524,15 +542,20 @@ int main(int argc, const char* argv[])
     cudaOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, advance_dtsave_cuda);
     gridSize = (Nparticles + blockSize - 1) / blockSize;
     printf("CUDA Parameters: <<< %d, %d >>>\n", gridSize, blockSize);
+#endif
 
 #ifdef WRITE_OUT
     write_positions(state);
 #endif
     while (count >= Nparticles / 200)
     {
-        // advance_dtsave(params, state);
+#ifdef __CUDACC__
         advance_dtsave_cuda<<< gridSize, blockSize >>>(params, state);
         cudaDeviceSynchronize();
+#else
+        advance_dtsave_cpu(params, state);
+#endif
+
         state->time += params.dtSave;
 #ifdef WRITE_OUT
         write_positions(state);
