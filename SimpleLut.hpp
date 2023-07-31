@@ -90,6 +90,7 @@ struct UniformLut
         if (fp)
         {
 #ifdef __CUDACC__
+            cudaDestroyTextureObject(tex);
             cudaFree(fp);
 #else
             free(fp);
