@@ -2,6 +2,7 @@
 #define CMO_RANDOM_HPP
 
 #include <cmath>
+#include <limits>
 #include "Constants.h"
 
 /*  Written in 2015 by Sebastiano Vigna (vigna@acm.org)
