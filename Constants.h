@@ -7,7 +7,8 @@
 typedef double f64;
 #ifdef CMO_SINGLE_PRECISION
     typedef float fp_t;
-    #define fpl(x) (x##f)
+    #define CMO_EXPAND(x) x
+    #define fpl(x) (CMO_EXPAND(x)##f)
 #else
     typedef double fp_t;
     #define fpl(x) (x)
