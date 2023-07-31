@@ -123,9 +123,10 @@ struct UniformLut
         Tstore alpha = (x - xm) / (xp - xm);
 
 #ifdef __CUDACC__
-        Tstore fpm = tex1Dfetch<Tstore>(tex, idx_m);
-        Tstore fpp = tex1Dfetch<Tstore>(tex, idx_p);
-        return (fpl(1.0) - alpha) * fpm + alpha * fpp;
+        // Tstore fpm = tex1Dfetch<Tstore>(tex, idx_m);
+        // Tstore fpp = tex1Dfetch<Tstore>(tex, idx_p);
+        // return (fpl(1.0) - alpha) * fpm + alpha * fpp;
+        return tex1D<Tstore>(tex, idx_m+alpha);
 #else
         return (fpl(1.0) - alpha) * fp[idx_m] + alpha * fp[idx_p];
 #endif
