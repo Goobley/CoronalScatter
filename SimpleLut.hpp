@@ -16,12 +16,16 @@ struct UniformLut
     int32_t Npoints;
     Tstore step;
     Tstore* fp;
+#ifdef __CUDACC__
+    cudaTextureObject_t tex;
+#endif
 
     UniformLut() : x_min(Tstore(0.0)),
                    x_max(Tstore(0.0)),
                    step(Tstore(0.0)),
                    Npoints(0),
-                   fp(nullptr)
+                   fp(nullptr),
+                   tex(0)
     {}
 
     UniformLut(
@@ -33,7 +37,8 @@ struct UniformLut
         x_max(x_max_),
         step(),
         Npoints(Nx),
-        fp(nullptr)
+        fp(nullptr),
+        tex(0)
     {
         init(x_min, x_max, Nx, fn);
     }
@@ -58,6 +63,26 @@ struct UniformLut
             Tcalc x = x_min + step_precise * idx;
             fp[idx] = fn(x);
         }
+
+#ifdef __CUDACC__
+        // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TEXTURE__OBJECT.html#group__CUDART__TEXTURE__OBJECT_1g16ac75814780c3a16e4c63869feb9ad3
+        // https://developer.nvidia.com/blog/cuda-pro-tip-kepler-texture-objects-improve-performance-and-flexibility/
+        cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(32, 0, 0, 0, cudaChannelFormatKindFloat);
+        // cudaArray* cuArray;
+        // cudaCheckErrors(cudaMallocArray(&cuArray, &channelDesc, Npoints, 0));
+        cudaResourceDesc resDesc;
+        memset(&resDesc, 0, sizeof(resDesc));
+        resDesc.resType = cudaResourceTypeLinear;
+        resDesc.res.linear.devPtr = fp;
+        resDesc.res.linear.desc = channelDesc;
+        resDesc.res.linear.sizeInBytes = Npoints * sizeof(fp_t);
+
+        cudaTextureDesc texDesc;
+        memset(&texDesc, 0, sizeof(texDesc));
+        texDesc.readMode = cudaReadModeElementType;
+
+        checkCudaErrors(cudaCreateTextureObject(&tex, &resDesc, &texDesc, nullptr));
+#endif
     }
 
     void free_fp()
@@ -96,7 +121,13 @@ struct UniformLut
         Tstore xp = xm + step;
         Tstore alpha = (x - xm) / (xp - xm);
 
+#ifdef __CUDACC__
         return (fpl(1.0) - alpha) * fp[idx_m] + alpha * fp[idx_p];
+#else
+        Tstore fpm = tex1Dfetch(tex, idx_m);
+        Tstore fpp = tex1Dfetch(tex, idx_p);
+        return (fpl(1.0) - alpha) * fpm + alpha * fpp;
+#endif
     }
 };
 
