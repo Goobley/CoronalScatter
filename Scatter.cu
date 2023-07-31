@@ -20,22 +20,46 @@
 
 constexpr int32_t LutSize = 1024 * 1024;
 
+
+#ifdef CMO_SINGLE_PRECISION
+
+fp_t draw_u(RandState* s)
+{
+    uint32_t i = Rand::next(s);
+    return RandomTransforms::u32_to_unit_T<fp_t>(i);
+}
+
+inline CudaFn fp_t box_muller_next(RandState* s)
+{
+    uint32_t x = next(s);
+    return RandomTransforms::u32_to_unit_T<fp_t>(x);
+}
+
+inline CudaFn BoxMullerResult<fp_t> draw_2_n(RandState* s)
+{
+    return RandomTransforms::box_muller(box_muller_next, s);
+}
+
+#else
+
 fp_t draw_u(RandState* s)
 {
     uint64_t i = Rand::next(s);
     return RandomTransforms::u64_to_unit_T<fp_t>(i);
 }
 
-CudaFn BoxMullerResult<fp_t> draw_2_n(RandState* s)
+inline CudaFn fp_t box_muller_next(RandState* s)
 {
-    uint64_t i0 = next(s);
-    uint64_t i1 = next(s);
-
-    fp_t u0 = RandomTransforms::u64_to_unit_T<fp_t>(i0);
-    fp_t u1 = RandomTransforms::u64_to_unit_T<fp_t>(i1);
-
-    return RandomTransforms::box_muller(u0, u1);
+    uint64_t x = next(s);
+    return RandomTransforms::u64_to_unit_T<fp_t>(x);
 }
+
+inline CudaFn BoxMullerResult<fp_t> draw_2_n(RandState* s)
+{
+    return RandomTransforms::box_muller(box_muller_next, s);
+}
+
+#endif
 
 struct SimParams
 {
@@ -318,7 +342,7 @@ CudaFn void advance_dtsave_kernel(SimParams p, SimState* state, int idx)
     namespace C = Constants;
     fp_t time0 = state->time;
     fp_t particle_time = state->time;
-    fp_t dt = p.dtSave;
+    const fp_t dt = p.dtSave;
 
     // int idx = threadIdx.x + blockIdx.x * blockDim.x;
     if (idx >= Nparticles)
@@ -559,7 +583,7 @@ void write_positions(SimState* s)
 // TODO(cmo): Minimise writebacks to the global arrays in the cuda kernel.
 int main(int argc, const char* argv[])
 {
-    constexpr int Nparticles = 1024 * 256;
+    constexpr int Nparticles = 1024 * 1024;
     SimParams params = default_params();
     SimState* state = init_particles(Nparticles, &params);
 

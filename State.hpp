@@ -33,9 +33,16 @@ struct BaseSimState
     RadiusLut domega_dr;
 };
 
-using SimState = BaseSimState<Xoroshiro256StarStar::Xoro256State>;
-namespace Rand = Xoroshiro256StarStar;
+#ifdef CMO_SINGLE_PRECISION
+    using SimState = BaseSimState<Xoshiro128StarStar::Xo128State>;
+    namespace Rand = Xoshiro128StarStar;
+    typedef Rand::Xo128State RandState;
+#else
+    using SimState = BaseSimState<Xoroshiro256StarStar::Xoro256State>;
+    namespace Rand = Xoroshiro256StarStar;
+    typedef Rand::Xoro256State RandState;
+#endif
+
 using RandomTransforms::BoxMullerResult;
-typedef Rand::Xoro256State RandState;
 #else
 #endif
