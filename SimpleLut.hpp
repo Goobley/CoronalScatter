@@ -126,6 +126,7 @@ struct UniformLut
         // Tstore fpm = tex1Dfetch<Tstore>(tex, idx_m);
         // Tstore fpp = tex1Dfetch<Tstore>(tex, idx_p);
         // return (fpl(1.0) - alpha) * fpm + alpha * fpp;
+        // NOTE(cmo): To use the floating point sampler like this, we need an cudaArray backed texture, not a linear.
         return tex1D<Tstore>(tex, idx_m+alpha);
 #else
         return (fpl(1.0) - alpha) * fp[idx_m] + alpha * fp[idx_p];
