@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 
-datafiles = [f for f in sorted(os.listdir()) if f.startswith('Output') and f.endswith('.npz')]
+datafiles = ['build/' + f for f in sorted(os.listdir('build')) if f.startswith('Output') and f.endswith('.npz')]
 data = [np.load(f) for f in datafiles]
 # times = [float(d.split('_')[1][:-4]) for d in datafiles]
 times = [d['time'].item() for d in data]
