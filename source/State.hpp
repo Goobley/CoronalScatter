@@ -7,8 +7,7 @@
 typedef UniformLut<f64, fp_t> RadiusLut;
 
 template <typename RandState>
-struct BaseSimState
-{
+struct BaseSimState {
     int64_t Nparticles;
     fp_t time;
     yakl::Array<int32_t, 1, yakl::memDevice> active;

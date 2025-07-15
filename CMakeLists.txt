@@ -6,7 +6,6 @@ else ()
 endif()
 
 add_subdirectory(fmt)
-add_subdirectory(yaml-cpp)
 include(FetchContent)
 FetchContent_Declare(
     argparse
@@ -37,7 +36,7 @@ if (${YAKL_AUTO_FENCE})
 endif()
 
 list(APPEND SCATTER_SOURCE_FILES
-    "source/Scatter_Cu.cpp"
+    "source/scatter.cpp"
 )
 
 add_executable(scatter
@@ -80,7 +79,6 @@ target_include_directories(scatter SYSTEM PUBLIC
 )
 target_link_libraries(scatter "${LDLIBS}")
 target_link_libraries(scatter fmt::fmt)
-target_link_libraries(scatter yaml-cpp::yaml-cpp)
 target_link_libraries(scatter argparse)
 target_link_libraries(scatter git_version)
 target_link_libraries(scatter Kokkos::kokkos)

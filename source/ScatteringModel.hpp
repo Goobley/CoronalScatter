@@ -8,18 +8,17 @@ extern "C" {
 #endif
 
 
-KOKKOS_INLINE_FUNCTION fp_t nu_scat_krupar(fp_t r, fp_t omega, fp_t eps, const SimState* s=nullptr)
-{
+KOKKOS_INLINE_FUNCTION fp_t nu_scat_krupar(fp_t r, fp_t omega, fp_t eps, const SimState* s=nullptr) {
 #ifndef OriginalNuScatForm
 #define OriginalNuScatForm 0
 #endif
 #if OriginalNuScatForm
     // NOTE(cmo): This function breaks in single precision.
     using fp_t = f64;
-#endif
-    namespace C = Constants;
     constexpr fp_t Third = FP(1.0) / FP(3.0);
     constexpr fp_t TwoThird = FP(2.0) / FP(3.0);
+#endif
+    namespace C = Constants;
     // inner turbulence scale
     fp_t l_i = r * FP(1e5);
     // outer turbulence scale
@@ -50,8 +49,7 @@ KOKKOS_INLINE_FUNCTION fp_t nu_scat_krupar(fp_t r, fp_t omega, fp_t eps, const S
     return nu_s;
 }
 
-KOKKOS_INLINE_FUNCTION fp_t nu_scat(fp_t r, fp_t omega, fp_t eps, const SimState* s=nullptr)
-{
+KOKKOS_INLINE_FUNCTION fp_t nu_scat(fp_t r, fp_t omega, fp_t eps, const SimState* s=nullptr) {
     return nu_scat_krupar(r, omega, eps, s);
 }
 

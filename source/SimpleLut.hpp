@@ -5,16 +5,14 @@
 #include <assert.h>
 
 template <typename Tcalc, typename Tstore>
-struct UniformLut
-{
+struct UniformLut {
     Tstore x_min;
     Tstore x_max;
     int32_t Npoints;
     Tstore step;
     yakl::Array<Tstore, 1, yakl::memDevice> data;
 
-    void init(Tcalc x_min_, Tcalc x_max_, int32_t Nx, std::function<Tcalc(Tcalc)> fn)
-    {
+    void init(Tcalc x_min_, Tcalc x_max_, int32_t Nx, std::function<Tcalc(Tcalc)> fn) {
         x_min = x_min_;
         x_max = x_max_;
         Npoints = Nx;
@@ -32,8 +30,7 @@ struct UniformLut
         data = host_data.createDeviceCopy();
     }
 
-    KOKKOS_INLINE_FUNCTION Tstore operator()(Tstore x) const
-    {
+    KOKKOS_INLINE_FUNCTION Tstore operator()(Tstore x) const {
 #ifdef YAKL_DEBUG
         if (x > x_max || x < x_min)
         {

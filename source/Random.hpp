@@ -57,13 +57,11 @@ static KOKKOS_INLINE_FUNCTION uint64_t rotl(const uint64_t x, int k) {
     return (x << k) | (x >> (64 - k));
 }
 
-struct Xoro256State
-{
+struct Xoro256State {
     uint64_t s[4];
 };
 
-KOKKOS_INLINE_FUNCTION Xoro256State seed_state(uint64_t x)
-{
+KOKKOS_INLINE_FUNCTION Xoro256State seed_state(uint64_t x) {
     Xoro256State result;
     for (int i = 0; i < 4; ++i)
         result.s[i] = splitmix64(&x);
@@ -118,8 +116,7 @@ KOKKOS_INLINE_FUNCTION void jump(Xoro256State* state) {
     s[3] = s3;
 }
 
-KOKKOS_INLINE_FUNCTION Xoro256State copy_jump(Xoro256State* state)
-{
+KOKKOS_INLINE_FUNCTION Xoro256State copy_jump(Xoro256State* state) {
     Xoro256State result(*state);
     jump(&result);
     return result;
@@ -185,13 +182,11 @@ static KOKKOS_INLINE_FUNCTION uint32_t rotl(const uint32_t x, int k) {
     return (x << k) | (x >> (32 - k));
 }
 
-struct Xo128State
-{
+struct Xo128State {
     uint32_t s[4];
 };
 
-KOKKOS_INLINE_FUNCTION Xo128State seed_state(uint64_t x)
-{
+KOKKOS_INLINE_FUNCTION Xo128State seed_state(uint64_t x) {
     Xo128State result;
     for (int i = 0; i < 4; ++i)
     {
@@ -248,8 +243,7 @@ KOKKOS_INLINE_FUNCTION void jump(Xo128State* state) {
     s[3] = s3;
 }
 
-KOKKOS_INLINE_FUNCTION Xo128State copy_jump(Xo128State* state)
-{
+KOKKOS_INLINE_FUNCTION Xo128State copy_jump(Xo128State* state) {
     Xo128State result(*state);
     jump(&result);
     return result;
@@ -293,31 +287,27 @@ namespace RandomTransforms
 // https://github.com/numba/numba/blob/main/numba/cuda/random.py
 // http://marc-b-reynolds.github.io/math/2020/06/16/UniformFloat.html
 template <typename T>
-KOKKOS_INLINE_FUNCTION T u64_to_unit_T(uint64_t x)
-{
+KOKKOS_INLINE_FUNCTION T u64_to_unit_T(uint64_t x) {
     // NOTE(cmo): I believe the 1.0 should be left as double, not fpl.
     // return T((x >> 11) * (1.0 / (UINT64_C(1) << 53)));
     return T((x >> 11) * 0x1p-53);
 }
 
 template <typename T>
-KOKKOS_INLINE_FUNCTION T u32_to_unit_T(uint32_t x)
-{
+KOKKOS_INLINE_FUNCTION T u32_to_unit_T(uint32_t x) {
     // NOTE(cmo): Case for when state is 32-bit (assumed to be generating f32s).
     // return T((x >> 8) * (1.0f / (UINT32_C(1) << 24)));
     return T((x >> 8) * 0x1p-24f);
 }
 
 template <typename T>
-struct BoxMullerResult
-{
+struct BoxMullerResult {
     T z0;
     T z1;
 };
 
 template <typename T, typename RandState>
-KOKKOS_INLINE_FUNCTION BoxMullerResult<T> box_muller(T (*next)(RandState*), RandState* state)
-{
+KOKKOS_INLINE_FUNCTION BoxMullerResult<T> box_muller(T (*next)(RandState*), RandState* state) {
     // NOTE(cmo): This function may need to draw more than once to ensure u0 >=
     // epsilon (or infs appear from log. Box-Muller is technically defined for
     // u0 and u1 in (0, 1), and we generate [0, 1)). In practice the bias is not
@@ -327,15 +317,14 @@ KOKKOS_INLINE_FUNCTION BoxMullerResult<T> box_muller(T (*next)(RandState*), Rand
     constexpr T epsilon = std::numeric_limits<T>::epsilon();
     constexpr T TwoPi = FP(2.0) * FP(M_PI);
     T u0 = FP(0.0);
-    while (u0 <= epsilon)
-    {
+    while (u0 <= epsilon) {
         u0 = next(state);
     }
     T u1 = next(state);
 
-    T prefactor = sqrt(T(FP(-2.0)) * log(u0));
-    T c = cos(TwoPi * u1);
-    T s = sin(TwoPi * u1);
+    T prefactor = std::sqrt(T(FP(-2.0)) * log(u0));
+    T c = std::cos(TwoPi * u1);
+    T s = std::sin(TwoPi * u1);
 
     BoxMullerResult<T> result;
     result.z0 = prefactor * c;
