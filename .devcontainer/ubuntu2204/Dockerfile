@@ -1,10 +1,5 @@
 FROM ubuntu:latest
 
-# NOTE(cmo): Based on https://github.com/adalundhe/dev-images/blob/main/cpp/Dockerfile.cpp
-ARG USERNAME=devcontainer
-ARG USER_UID=5000
-ARG USER_GID=$USER_UID
-
 RUN apt update && apt install -y build-essential curl libcurl4-openssl-dev libopenmpi-dev cmake wget git libopenblas-dev liblapack-dev sudo
 
 WORKDIR /src/hdf5
@@ -19,14 +14,18 @@ RUN ldconfig
 
 RUN apt -y update && apt install -y sudo
 
-RUN groupadd --gid $USER_GID $USERNAME \
-    && adduser --uid $USER_UID --gid $USER_GID $USERNAME \
-    && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
-    && chmod 0440 /etc/sudoers.d/$USERNAME
+# NOTE(cmo): Based on https://github.com/adalundhe/dev-images/blob/main/cpp/Dockerfile.cpp
+# ARG USERNAME=devcontainer
+# ARG USER_UID=1000
+# ARG USER_GID=$USER_UID
+# RUN groupadd --gid $USER_GID $USERNAME \
+#     && adduser --uid $USER_UID --gid $USER_GID $USERNAME \
+#     && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+#     && chmod 0440 /etc/sudoers.d/$USERNAME
 
-ENV HOME=/home/$USERNAME
+# ENV HOME=/home/$USERNAME
 
-USER $USERNAME
+# USER $USERNAME
 
 # WORKDIR /src/conda
 # COPY docker_deps/miniconda/env_setup.sh .

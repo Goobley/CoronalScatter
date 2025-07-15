@@ -8,6 +8,7 @@ build/*
 !build/cmake_basic.sh
 !build/cmake_clean.sh
 !build/cmake_docker.sh
+!build/cmake_docker_omp_nompi.sh
 !build/cmake_docker_nompi.sh
 !build/cmake_docker_nompi_cpu.sh
 !build/cmake_docker_nompi_cpu_serial.sh
