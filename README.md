@@ -1,6 +1,6 @@
 ## Coronal Scattering Code
 
-Accelerated program for calculating radio scattering in the solar corona, using Kokkos to abstract parallelism.
+Accelerated program for calculating radio scattering in the solar corona, using Kokkos to abstract parallelism, based on the original IDL scattering code developed by E. Kontar, present as `ray_new.pro`.
 
 ## Requirements
 
