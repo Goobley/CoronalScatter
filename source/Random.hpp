@@ -315,7 +315,7 @@ KOKKOS_INLINE_FUNCTION BoxMullerResult<T> box_muller(T (*next)(RandState*), Rand
     // Given the _much_ smaller state space, we just happened to run into this
     // case faster in pure f32 generation.
     constexpr T epsilon = std::numeric_limits<T>::epsilon();
-    constexpr T TwoPi = FP(2.0) * FP(M_PI);
+    constexpr T TwoPi = FP(2.0) * M_PI;
     T u0 = FP(0.0);
     while (u0 <= epsilon) {
         u0 = next(state);
