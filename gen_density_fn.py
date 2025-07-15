@@ -30,9 +30,9 @@ def nu_scat_krupar(r, omega, eps):
 def optim(expr):
     return optimize(create_expand_pow_optimization(30)(expr), optims_c99)
 
-class InlineC99IspcCodeGen(C99CodeGen):
+class InlineKokkosCodeGen(C99CodeGen):
     def _get_routine_opening(self, routine):
-        return [f"inline {super()._get_routine_opening(routine)[0]}"]
+        return [f"KOKKOS_INLINE_FUNCTION {super()._get_routine_opening(routine)[0]}"]
 
     def _preprocessor_statements(self, prefix):
         code_lines = []
@@ -51,14 +51,9 @@ class InlineC99IspcCodeGen(C99CodeGen):
 
 file_opening = """#if !defined(DENSITY_MODEL_H)
 #define DENSITY_MODEL_H
-#ifdef __cplusplus
-extern "C" {
-#endif
 """
-file_closing = """#ifdef __cplusplus
-}
-#endif
-#else
+file_opening_kokkos = "#include \"Constants.hpp\"\n" + file_opening
+file_closing = """#else
 #endif
 """
 
@@ -69,23 +64,16 @@ if __name__ == '__main__':
     domega_dr = sp.diff(omega_pe(r), r)
     nu_scat = nu_scat_krupar(r, omega, eps)
 
-    gen = InlineC99IspcCodeGen()
+    gen = InlineKokkosCodeGen(cse=True)
     source, header = codegen([
         ('density_r', optim(density_r)),
         ('omega_pe', optim(omega_pe_r)),
         ('domega_dr', optim(domega_dr)),
-        ], prefix="DensityScatteringModel",
-        header=False, empty=False, code_gen=gen)
-    source_nu, header = codegen([
-        ('nu_scat', optim(nu_scat)),
-        ], prefix="DensityScatteringModel",
-        header=False, empty=False, code_gen=gen,
-        argument_sequence=[r, omega, eps])
+        ], prefix="source/DensityModel", header=False, empty=False, code_gen=gen)
 
-    filename = source[0].replace('.c', '.h')
+    filename = source[0].replace('.c', '.hpp')
     with open(filename, 'w') as f:
-        f.write(file_opening)
-        f.write("#ifndef ISPC\n")
+        f.write(file_opening_kokkos)
         f.write(source[1])
         f.write(source_nu[1])
         f.write("#else\n")

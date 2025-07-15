@@ -1,0 +1,6 @@
+[submodule "YAKL"]
+	path = YAKL
+	url = git@github.com:Goobley/YAKL.git
+[submodule "fmt"]
+	path = fmt
+	url = https://github.com/fmtlib/fmt.git
